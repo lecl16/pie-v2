@@ -1,0 +1,8 @@
+#/bin/bash
+/usr/local/bin/setup-wifi.sh
+
+chown root:devapp /var/log/bash_commands.log
+chmod 664 /var/log/bash_commands.log
+
+exit 0
+

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Exec=bash -c '/usr/local/bin/inject-cert.sh >> /tmp/inject-cert.log 2>&1'
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=Inject Certs
+Comment=Inject custom certificates after login
+

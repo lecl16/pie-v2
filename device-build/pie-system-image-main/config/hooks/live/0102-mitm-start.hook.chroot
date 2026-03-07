@@ -1,0 +1,13 @@
+cat <<EOF > /home/student/.config/autostart/mitmproxy-start.desktop
+[Desktop Entry]
+Type=Application
+Exec=bash -c "mitmdump > /dev/null & PID=$!; sleep 2; kill $PID"
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=mitmproxy Background Init
+Comment=Start mitmproxy in background to create .mitmproxy
+EOF
+
+chmod +x /home/student/.config/autostart/mitmproxy-start.desktop
+chown -R student:student /home/student/.config/autostart/mitmproxy-start.desktop

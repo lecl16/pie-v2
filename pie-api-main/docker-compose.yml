@@ -1,0 +1,97 @@
+version: "3.8"
+
+services:
+  app:
+    build: .
+    container_name: pie_api
+    depends_on:
+      - db
+      - redis
+      - elasticsearch
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Lisbon
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - app_files:/home
+      
+    command: ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  db:
+    image: mysql:8.0
+    container_name: mysql_container
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: pie123
+      MYSQL_DATABASE: pie_api_db
+      MYSQL_USER: pie
+      MYSQL_PASSWORD: pie123
+      TZ : Europe/Lisbon
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  redis:
+    image: redis:7
+    container_name: redis_broker
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Lisbon
+    ports:
+      - "6379:6379"
+  
+  # Interface to interact with the database
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: phpmyadmin_container
+    restart: always
+    environment:
+      PMA_HOST: db
+      MYSQL_ROOT_PASSWORD: pie123	
+    ports:
+      - "8080:80"
+
+  clamav:
+    image: clamav/clamav:stable
+    container_name: clamav_container
+    ports:
+      - "3310:3310"
+    volumes:
+      - ./clamav:/var/lib/clamav
+    restart: unless-stopped
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - TZ=Europe/Lisbon
+
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    restart: always
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.17.9
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  app_files:
+  clamav_data:
+  elasticsearch_data:

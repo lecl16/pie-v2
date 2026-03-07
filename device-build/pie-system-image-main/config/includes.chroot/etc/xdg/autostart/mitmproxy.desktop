@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Exec=mitmdump -p 8082 -s /usr/local/bin/whitelist.py
+Hidden=false
+NoDisplay=false
+Name=MITMProxy Script

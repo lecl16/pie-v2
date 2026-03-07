@@ -1,0 +1,8 @@
+/.build/
+/binary/
+/cache/
+/chroot/
+
+/binary*
+/chroot*
+/live*

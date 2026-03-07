@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# Ativa rsyslog
+systemctl enable rsyslog
+
+sed -i 's/\$FileGroup \w\+/\$FileGroup devapp/g' /etc/rsyslog.conf

@@ -1,0 +1,32 @@
+# FastAPI framework
+fastapi[standard]  # Includes pydantic, starlette, and other dependencies
+
+# ASGI server
+uvicorn[standard]  # ASGI server to run FastAPI
+
+# Database integration
+sqlalchemy  # ORM for database management
+alembic  # Migrations for SQLAlchemy
+pymysql  # MySQL database driver
+mysqlclient  # MySQL client for Python
+
+# Environment variables management
+python-dotenv  # Load .env files
+
+# Message Broker (Celery + Redis/RabbitMQ)
+celery  # Task queue system
+redis  # Redis for message brokering (if using Redis backend)
+kombu  # Celery broker support (for RabbitMQ, Redis, SQS, etc.)
+
+pydantic # Data validation and settings management
+cryptography # Encrypt and decrypt data
+unidecode # Convert Unicode to ASCII
+python-magic # File type detection
+bcrypt # Password hashing
+clamd # Antivirus scanner
+elasticsearch # Elasticsearch integration
+aiohttp # HTTP client/server for asyncio
+websockets # WebSockets for asyncio
+python-jose[cryptography] # JWT token handling
+passlib # Password hashing
+slowapi # Rate limiting

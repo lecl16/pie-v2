@@ -1,0 +1,12 @@
+#!/bin/bash
+
+groupadd -f devapp
+
+mkdir -p /var/log/pie-devapp
+chown -R root:devapp /var/log/pie-devapp
+chmod -R g+w /var/log/pie-devapp
+
+mkdir -p /etc/iptables
+touch /etc/iptables/whitelist.txt
+chown root:devapp /etc/iptables/whitelist.txt
+chmod g+w /etc/iptables/whitelist.txt

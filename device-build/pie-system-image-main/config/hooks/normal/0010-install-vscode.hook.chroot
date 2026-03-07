@@ -1,0 +1,10 @@
+#!/bin/sh
+
+set -e
+
+echo "code code/add-microsoft-repo boolean true" | sudo debconf-set-selections
+echo "APT::Get::Assume-Yes \"true\";\nAPT::Get::allow \"true\";" | sudo tee -a /etc/apt/apt.conf.d/90_no_prompt
+
+wget https://go.microsoft.com/fwlink/?LinkID=760868 -O code.deb
+sudo apt install --assume-yes ./code.deb
+rm code.deb

@@ -1,0 +1,294 @@
+[
+    {
+        "id": 40379,
+        "name": "Fundamentos de Programação",
+        "description": "40379-fp",
+        "exams":[
+            {
+                "id": 1,
+                "name": "Teste 1 Epoca Normal",
+                "sessions": [
+                    {
+                        "id": 1,
+                        "name": "Sessao 1",
+                        "date": "2024-10-14",
+                        "hour": "10:00",
+                        "room": "419"
+                    },
+                    {
+                        "id": 2,
+                        "name": "Sessao 2",
+                        "date": "2024-10-14",
+                        "hour": "14:00",
+                        "room": "419"
+                    }
+                ]
+            },
+            {
+                "id": 2,
+                "name": "Teste 2 Epoca Normal",
+                "sessions": [
+                    {
+                        "id": 3,
+                        "name": "Sessao 1",
+                        "date": "2024-11-25",
+                        "hour": "10:00",
+                        "room": "419"
+                    },
+                    {
+                        "id": 4,
+                        "name": "Sessao 2",
+                        "date": "2024-11-25",
+                        "hour": "14:00",
+                        "room": "419"
+                    }
+                ]
+            },
+            {
+                "id": 3,
+                "name": "Teste Teorico Epoca Normal",
+                "sessions": [
+                    {
+                        "id": 5,
+                        "name": "Sessao 1",
+                        "date": "2025-01-14",
+                        "hour": "10:00",
+                        "room": "ANF IV"
+                    }
+                ]
+            },
+            {
+                "id": 4,
+                "name": "Teste Epoca Recurso",
+                "sessions": [
+                    {
+                        "id": 6,
+                        "name": "Sessao 1",
+                        "date": "2025-02-03",
+                        "hour": "10:00",
+                        "room": "ANF IV"
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "id": 41948,
+        "name": "Arquitetura de Computadores I",
+        "description": "41948-ac1",
+        "exams":[
+            {
+                "id": 5,
+                "name": "Teste 1 Pratico Epoca Normal",
+                "sessions": [
+                    {
+                        "id": 7,
+                        "name": "Sessao 1",
+                        "date": "2024-10-14",
+                        "hour": "10:00",
+                        "room": "419"
+                    },
+                    {
+                        "id": 8,
+                        "name": "Sessao 2",
+                        "date": "2024-10-14",
+                        "hour": "14:00",
+                        "room": "419"
+                    }
+                ]
+            },
+            {
+                "id": 6,
+                "name": "Teste 2 Pratico Epoca Normal",
+                "sessions": [
+                    {
+                        "id": 9,
+                        "name": "Sessao 1",
+                        "date": "2024-11-25",
+                        "hour": "10:00",
+                        "room": "419"
+                    },
+                    {
+                        "id": 10,
+                        "name": "Sessao 2",
+                        "date": "2024-11-25",
+                        "hour": "14:00",
+                        "room": "419"
+                    }
+                ]
+            },
+            {
+                "id": 7,
+                "name": "Teste Teorico Epoca Normal",
+                "sessions": [
+                    {
+                        "id": 11,
+                        "name": "Sessao 1",
+                        "date": "2025-01-14",
+                        "hour": "10:00",
+                        "room": "ANF IV"
+                    }
+                ]
+            },
+            {
+                "id": 8,
+                "name": "Teste Teorico Epoca Recurso",
+                "sessions": [
+                    {
+                        "id": 12,
+                        "name": "Sessao 1",
+                        "date": "2025-02-03",
+                        "hour": "10:00",
+                        "room": "ANF IV"
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "id": 42509,
+        "name": "Sistemas de Operação",
+        "description": "42509-so",
+        "exams":[
+            {
+                "id": 9,
+                "name": "Teste 1 Pratico Epoca Normal",
+                "sessions": [
+                    {
+                        "id": 13,
+                        "name": "Sessao 1",
+                        "date": "2024-10-14",
+                        "hour": "10:00",
+                        "room": "419"
+                    },
+                    {
+                        "id": 14,
+                        "name": "Sessao 2",
+                        "date": "2024-10-14",
+                        "hour": "14:00",
+                        "room": "419"
+                    }
+                ]
+            },
+            {
+                "id": 10,
+                "name": "Teste 2 Pratico Epoca Normal",
+                "sessions": [
+                    {
+                        "id": 15,
+                        "name": "Sessao 1",
+                        "date": "2024-11-25",
+                        "hour": "10:00",
+                        "room": "419"
+                    },
+                    {
+                        "id": 16,
+                        "name": "Sessao 2",
+                        "date": "2024-11-25",
+                        "hour": "14:00",
+                        "room": "419"
+                    }
+                ]
+            },
+            {
+                "id": 11,
+                "name": "Teste Teorico Epoca Normal",
+                "sessions": [
+                    {
+                        "id": 17,
+                        "name": "Sessao 1",
+                        "date": "2025-01-14",
+                        "hour": "10:00",
+                        "room": "ANF IV"
+                    }
+                ]
+            },
+            {
+                "id": 12,
+                "name": "Teste Teorico Epoca Recurso",
+                "sessions": [
+                    {
+                        "id": 18,
+                        "name": "Sessao 1",
+                        "date": "2025-02-03",
+                        "hour": "10:00",
+                        "room": "ANF IV"
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "id": 41469,
+        "name": "Compiladores",
+        "description": "41469-c",
+        "exams":[
+            {
+                "id": 13,
+                "name": "Teste 1 Pratico Epoca Normal",
+                "sessions": [
+                    {
+                        "id": 19,
+                        "name": "Sessao 1",
+                        "date": "2024-10-14",
+                        "hour": "10:00",
+                        "room": "419"
+                    },
+                    {
+                        "id": 20,
+                        "name": "Sessao 2",
+                        "date": "2024-10-14",
+                        "hour": "14:00",
+                        "room": "419"
+                    }
+                ]
+            },
+            {
+                "id": 14,
+                "name": "Teste 2 Pratico Epoca Normal",
+                "sessions": [
+                    {
+                        "id": 21,
+                        "name": "Sessao 1",
+                        "date": "2024-11-25",
+                        "hour": "10:00",
+                        "room": "419"
+                    },
+                    {
+                        "id": 22,
+                        "name": "Sessao 2",
+                        "date": "2024-11-25",
+                        "hour": "14:00",
+                        "room": "419"
+                    }
+                ]
+            },
+            {
+                "id": 15,
+                "name": "Teste Teorico Epoca Normal",
+                "sessions": [
+                    {
+                        "id": 23,
+                        "name": "Sessao 1",
+                        "date": "2025-01-14",
+                        "hour": "10:00",
+                        "room": "ANF IV"
+                    }
+                ]
+            },
+            {
+                "id": 16,
+                "name": "Teste Teorico Epoca Recurso",
+                "sessions": [
+                    {
+                        "id": 24,
+                        "name": "Sessao 1",
+                        "date": "2025-02-03",
+                        "hour": "10:00",
+                        "room": "ANF IV"
+                    }
+                ]
+            }
+        ]
+    }
+]

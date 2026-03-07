@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Disable XFCE Desktop Icons
+Exec=/home/student/.config/disable-icons.sh
+X-GNOME-Autostart-enabled=true
+

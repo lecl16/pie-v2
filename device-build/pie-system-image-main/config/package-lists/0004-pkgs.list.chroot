@@ -1,0 +1,10 @@
+task-xfce-desktop
+lightdm
+libsecret-1-dev 
+libjsoncpp-dev 
+libsecret-1-0
+libglib2.0-0
+systemd
+dbus
+lightdm
+xfce4

@@ -1,0 +1,18 @@
+#!/bin/bash
+
+mkdir -p /home/student/.config/autostart
+
+cat <<EOF > /home/student/.config/autostart/firefox-init.desktop
+[Desktop Entry]
+Type=Application
+Name=Firefox Headless Init
+Exec=bash -c "firefox --headless --screenshot about:blank; rm -f \$HOME/screenshot.png"
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Comment=Start Firefox headless to create .mozilla
+EOF
+
+chmod +x /home/student/.config/autostart/firefox-init.desktop
+chown -R student:student /home/student/.config/autostart
+

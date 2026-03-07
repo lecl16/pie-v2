@@ -1,0 +1,5 @@
+#!/bin/bash
+set -e
+
+ln -s /etc/systemd/system/mitmproxy.service /etc/systemd/system/multi-user.target.wants/mitmproxy.service
+ln -s /etc/systemd/system/inject-cert.service /etc/systemd/system/multi-user.target.wants/inject-cert.service

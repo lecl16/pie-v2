@@ -1,0 +1,20 @@
+[Unit]
+Description=App in flutter
+After=network.target
+
+[Service]
+ExecStartPre=/bin/sleep 10  
+Restart=always             
+RestartSec=5              
+StartLimitInterval=200   
+StartLimitBurst=5       
+ExecStart=/opt/devapp/devapp
+WorkingDirectory=/opt/devapp
+User=student
+Group=devapp
+Restart=always
+Environment=DISPLAY=:0
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+
+[Install]
+WantedBy=multi-user.target

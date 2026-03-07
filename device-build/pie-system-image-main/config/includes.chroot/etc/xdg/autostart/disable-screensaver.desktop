@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Disable Screensaver
+Exec=xfconf-query -c xfce4-session -p /general/LockCommand -s ""
+

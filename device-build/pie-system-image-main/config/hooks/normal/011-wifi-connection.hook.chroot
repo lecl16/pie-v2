@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# Parâmetros fixos (podes adaptar ou tornar dinâmicos com variáveis/env)
+SSID=""
+PSK=""
+UUID=$(uuidgen)
+
+mkdir -p /etc/NetworkManager/system-connections
+
+cat <<EOF > /etc/NetworkManager/system-connections/WiFiAuto.nmconnection
+[connection]
+id=$SSID
+uuid=$UUID
+type=wifi
+autoconnect=true
+
+[wifi]
+ssid=$SSID
+mode=infrastructure
+mac-address-blacklist=
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=$PSK
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto
+EOF
+
+chmod 600 /etc/NetworkManager/system-connections/WiFiAuto.nmconnection
+

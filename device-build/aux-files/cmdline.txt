@@ -1,0 +1,1 @@
+console=serial0,115200 console=tty1 loglevel=5 quiet logo.nologo root=PARTUUID=96653d61-02 rootfstype=ext4 fsck.repair=yes rootwait modules-load=dwc2,g_mass_storage g_mass_storage.file=/boot/firmware/live-image-amd64.hybrid.iso g_mass_storage.ro=1 g_mass_storage.removable=1 g_mass_storage.cdrom=0 quiet splash plymouth.ignore-serial-consoles

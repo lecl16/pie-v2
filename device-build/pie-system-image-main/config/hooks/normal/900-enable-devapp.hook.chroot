@@ -1,0 +1,6 @@
+#!/bin/bash
+set -e
+
+#cp /etc/skel/.config/systemd/user/user-devapp.service /etc/systemd/system/
+
+systemctl enable devapp.service

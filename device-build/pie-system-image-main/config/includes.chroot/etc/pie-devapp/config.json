@@ -1,0 +1,7 @@
+{
+	"deviceId": 1,
+	"apiBaseUrl": "https://pie-api.tiagorg.pt",
+	"examDirectory": "/home/student/Desktop/Exam",
+	"whitelistFile": "/etc/iptables/whitelist.txt",
+	"logsDirectory": "/var/log/pie-devapp"
+}

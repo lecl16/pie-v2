@@ -1,0 +1,79 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+.env/
+.venv/
+env/
+.envrc
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Python packages
+*.egg-info/
+*.egg
+*.whl
+dist/
+build/
+
+# Logs and local database
+*.log
+logs/
+debug.log
+*.sqlite3
+*.db
+
+# Environment variables & secrets
+.env
+.env.local
+.env.*.local
+
+# IDE/editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Pytest cache
+.pytest_cache/
+
+# FastAPI specific
+instance/
+*.pid
+*.sock
+*.coverage
+.coverage.*
+
+# Mypy & Type Checking
+.mypy_cache/
+.dmypy.json
+.pyre/
+
+# Black formatter & Ruff linter cache
+.black/
+ruff_cache/
+
+# Local AI/ML artifacts
+mlruns/
+*.mlmodel
+model_store/
+checkpoints/
+tensorboard_logs/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Cache files
+.cache/
+__pypackages__/
+
+#ClamAV files because they are too big
+clamav/
