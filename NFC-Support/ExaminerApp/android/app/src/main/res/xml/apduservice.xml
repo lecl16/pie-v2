@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    AID filter for ExaminerApp HCE service.
+    AID: F045584D41505031 = F0 (proprietary prefix) + ASCII "EXAMAPP1"
+    category="other" is required for all non-payment HCE apps.
+-->
+<host-apdu-service
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/app_name"
+    android:requireDeviceUnlock="false">
+
+    <aid-group
+        android:description="@string/app_name"
+        android:category="other">
+        <aid-filter android:name="F045584D41505031" />
+    </aid-group>
+
+</host-apdu-service>
