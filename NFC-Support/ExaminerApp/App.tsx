@@ -5,6 +5,7 @@
 import React, { useCallback, useState } from 'react';
 import {
   Alert,
+  Image,
   NativeModules,
   ScrollView,
   StatusBar,
@@ -21,7 +22,7 @@ const { NfcHceModule } = NativeModules;
 
 if (!NfcHceModule) {
   console.error(
-    '[ExaminerApp] NfcHceModule not found. ' +
+    '[PIE Provisioner] NfcHceModule not found. ' +
     'Make sure you ran a full native rebuild (npm run android) after adding the module.',
   );
 }
@@ -119,8 +120,13 @@ function AppContent(): React.JSX.Element {
       contentContainerStyle={[styles.container, { paddingTop: insets.top + 16 }]}
       keyboardShouldPersistTaps="handled">
 
-      <Text style={styles.title}>PIE Provisioner</Text>
-      <Text style={styles.subtitle}>NFC Sender for PN532</Text>
+      <View style={styles.hero}>
+        <Image
+          source={require('./assests/PIE_Provisioner_logo_round.png')}
+          style={styles.heroLogo}
+          resizeMode="contain"
+        />
+      </View>
 
       <View style={styles.infoCard}>
         <Text style={styles.infoTitle}>APDU Commands</Text>
@@ -197,46 +203,51 @@ function AppContent(): React.JSX.Element {
 
 // ---- Styles -----------------------------------------------------------------
 
-const ACCENT = '#e63946';
+const BRAND_SAND = '#fff5e6';
+const BRAND_TAUPE = '#90887a';
+const BRAND_IVORY = '#fff5e6';
+const BRAND_CHARCOAL = '#4e4841';
 
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
     alignItems: 'center',
-    backgroundColor: ACCENT,
+    backgroundColor: BRAND_SAND,
     paddingHorizontal: 20,
     paddingBottom: 48,
   },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 15,
-    color: 'rgba(255,255,255,0.8)',
+  hero: {
+    width: '100%',
+    borderRadius: 24,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
     marginBottom: 12,
+    alignItems: 'center',
+  },
+  heroLogo: {
+    width: '100%',
+    maxWidth: 320,
+    height: 180,
   },
   infoCard: {
     width: '100%',
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 12,
+    backgroundColor: '#d7cebf',
+    borderRadius: 14,
     padding: 12,
     marginBottom: 14,
   },
   infoTitle: {
-    color: '#fff',
+    color: BRAND_CHARCOAL,
     fontWeight: '700',
     marginBottom: 4,
   },
   infoText: {
-    color: '#fff',
+    color: BRAND_CHARCOAL,
     fontSize: 12,
   },
   card: {
     width: '100%',
-    backgroundColor: '#fff',
+    backgroundColor: BRAND_IVORY,
     borderRadius: 14,
     padding: 16,
     marginBottom: 16,
@@ -253,24 +264,24 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: '#cec5b5',
     borderRadius: 8,
     paddingVertical: 10,
     paddingHorizontal: 12,
     fontSize: 15,
-    color: '#222',
-    backgroundColor: '#fafafa',
+    color: BRAND_CHARCOAL,
+    backgroundColor: '#fffdf8',
   },
   secondaryBtn: {
     marginTop: 14,
     alignSelf: 'flex-start',
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#e0d8cb',
     borderRadius: 8,
     paddingVertical: 10,
     paddingHorizontal: 12,
   },
   secondaryBtnText: {
-    color: '#333',
+    color: BRAND_CHARCOAL,
     fontWeight: '600',
     fontSize: 13,
   },
@@ -292,39 +303,39 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   statusOff: {
-    backgroundColor: 'rgba(0,0,0,0.2)',
+    backgroundColor: '#b5ad9f',
   },
   statusOn: {
-    backgroundColor: '#2dc653',
+    backgroundColor: '#668f52',
   },
   statusText: {
-    color: '#fff',
+    color: BRAND_IVORY,
     fontWeight: '600',
     fontSize: 14,
     textAlign: 'center',
   },
   activateBtn: {
-    backgroundColor: '#fff',
+    backgroundColor: BRAND_TAUPE,
     borderRadius: 12,
     paddingVertical: 16,
     paddingHorizontal: 52,
     elevation: 3,
   },
   activateBtnText: {
-    color: ACCENT,
-    fontWeight: 'bold',
+    color: BRAND_IVORY,
+    fontWeight: '800',
     fontSize: 16,
   },
   deactivateBtn: {
-    backgroundColor: '#1d1d1d',
+    backgroundColor: BRAND_CHARCOAL,
     borderRadius: 12,
     paddingVertical: 16,
     paddingHorizontal: 52,
     elevation: 3,
   },
   deactivateBtnText: {
-    color: '#fff',
-    fontWeight: 'bold',
+    color: BRAND_IVORY,
+    fontWeight: '800',
     fontSize: 16,
   },
 });
