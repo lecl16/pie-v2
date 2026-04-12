@@ -10,8 +10,8 @@
     <application
       android:name=".MainApplication"
       android:label="@string/app_name"
-      android:icon="@mipmap/ic_launcher"
-      android:roundIcon="@mipmap/ic_launcher_round"
+      android:icon="@mipmap/app_provisioner_logo_round"
+      android:roundIcon="@mipmap/app_provisioner_logo_round"
       android:allowBackup="false"
       android:theme="@style/AppTheme"
       android:usesCleartextTraffic="${usesCleartextTraffic}"
@@ -30,7 +30,6 @@
         </intent-filter>
       </activity>
 
-      <!-- Simple HCE service used to return exam payload data to PN532 readers. -->
       <service
           android:name=".ExamHceService"
           android:exported="true"

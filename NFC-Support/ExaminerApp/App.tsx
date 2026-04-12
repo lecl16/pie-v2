@@ -84,7 +84,7 @@ function AppContent(): React.JSX.Element {
       !payload.nmec.trim() ||
       !payload.timestamp.trim()
     ) {
-      Alert.alert('Incomplete', 'Please fill IP, Session ID, NMec and timestamp.');
+      Alert.alert('Incomplete', 'Please fill IP, Session ID, Student ID and Timestamp.');
       return;
     }
 
@@ -119,7 +119,7 @@ function AppContent(): React.JSX.Element {
       contentContainerStyle={[styles.container, { paddingTop: insets.top + 16 }]}
       keyboardShouldPersistTaps="handled">
 
-      <Text style={styles.title}>ExaminerApp</Text>
+      <Text style={styles.title}>PIE Provisioner</Text>
       <Text style={styles.subtitle}>NFC Sender for PN532</Text>
 
       <View style={styles.infoCard}>
@@ -129,7 +129,7 @@ function AppContent(): React.JSX.Element {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.label}>IP Address</Text>
+        <Text style={styles.label}>Exam Server IP Address</Text>
         <TextInput
           style={styles.input}
           value={payload.ip}
@@ -149,7 +149,7 @@ function AppContent(): React.JSX.Element {
           editable={!hceActive}
         />
 
-        <Text style={styles.label}>NMec</Text>
+        <Text style={styles.label}>Student ID (NMec)</Text>
         <TextInput
           style={styles.input}
           value={payload.nmec}
