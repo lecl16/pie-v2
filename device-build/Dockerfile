@@ -15,6 +15,6 @@ RUN apt update && apt install -y \
  && rm -rf /var/lib/apt/lists/*
 
 # Register QEMU handlers for foreign archs
-RUN update-binfmts --enable qemu-arm && update-binfmts --enable qemu-aarch64
+RUN update-binfmts --enable qemu-arm && update-binfmts --enable qemu-aarch64    
 
 WORKDIR /build
