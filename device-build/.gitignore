@@ -1,0 +1,25 @@
+# live-build generated artifacts (chroot filesystem, binary output, caches)
+.build/
+binary/
+binary*
+cache/
+chroot/
+chroot*
+live-image*
+*.iso
+*.iso.zsync
+*.img
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor / OS junk
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
