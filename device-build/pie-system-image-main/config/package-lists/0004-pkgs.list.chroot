@@ -1,6 +1,6 @@
 task-xfce-desktop
 lightdm
-libsecret-1-dev 
+libsecret-1-dev
 libjsoncpp-dev 
 libsecret-1-0
 libglib2.0-0
@@ -8,3 +8,9 @@ systemd
 dbus
 lightdm
 xfce4
+xserver-xorg-input-libinput
+libinput-tools
+openssh-server
+firmware-linux
+firmware-linux-nonfree
+firmware-misc-nonfree

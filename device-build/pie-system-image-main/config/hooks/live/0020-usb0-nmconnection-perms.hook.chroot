@@ -1,0 +1,4 @@
+#!/bin/sh
+set -e
+chmod 600 /etc/NetworkManager/system-connections/usb0-host.nmconnection
+chown root:root /etc/NetworkManager/system-connections/usb0-host.nmconnection

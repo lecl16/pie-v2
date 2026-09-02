@@ -1,0 +1,16 @@
+[connection]
+id=usb0-host
+uuid=8cef70b5-24e2-4228-95e9-864a786d33d6
+type=ethernet
+interface-name=usb0
+
+[ipv4]
+method=manual
+address1=192.168.7.1/24,192.168.7.2
+dns=192.168.7.2;
+ignore-auto-dns=true
+
+[ipv6]
+method=ignore
+
+[proxy]
