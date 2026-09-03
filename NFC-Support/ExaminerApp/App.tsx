@@ -1,5 +1,10 @@
 /**
  * @format
+ *
+ * Secure provisioning app flow:
+ * 1) Examiner fills payload + shared secret.
+ * 2) App enables HCE secure mode.
+ * 3) Reader sends challenge APDU and then requests signed token APDU.
  */
 
 import React, { useCallback, useState } from 'react';
@@ -20,28 +25,24 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 
 const { NfcHceModule } = NativeModules;
 
-if (!NfcHceModule) {
-  console.error(
-    '[PIE Provisioner] NfcHceModule not found. ' +
-    'Make sure you ran a full native rebuild (npm run android) after adding the module.',
-  );
-}
-
-interface ExamPayload {
+interface ProvisionPayload {
   ip: string;
   sessionId: string;
   nmec: string;
   timestamp: string;
+  ttlSec: string;
 }
 
 interface NativeHceModule {
-  setExamData?: (jsonPayload: string) => void;
+  setSecureProvisioning?: (payloadJson: string, sharedSecretBase64Url: string) => void;
   clearExamData?: () => void;
 }
 
 const nfcHceModule = NfcHceModule as NativeHceModule | undefined;
 
-// ---- Root -------------------------------------------------------------------
+function isBase64Url(input: string): boolean {
+  return /^[A-Za-z0-9_-]+$/.test(input);
+}
 
 function App(): React.JSX.Element {
   const isDarkMode = useColorScheme() === 'dark';
@@ -53,73 +54,89 @@ function App(): React.JSX.Element {
   );
 }
 
-// ---- Main Content ------------------------------------------------------------
-
 function AppContent(): React.JSX.Element {
   const insets = useSafeAreaInsets();
 
-  const [hceActive, setHceActive] = useState(false);
-  const [status, setStatus] = useState('Fill all fields and tap Activate NFC Sender.');
+  const [active, setActive] = useState(false);
+  const [status, setStatus] = useState('Fill fields and activate secure provisioning.');
+  // TODO(server-integration): Replace manual secret entry with a fetch from backend.
+  // The expected flow is: reader uploads secret to server, app retrieves it for this exam/session.
+  const [sharedSecretB64u, setSharedSecretB64u] = useState('');
 
-  const [payload, setPayload] = useState<ExamPayload>({
+  const [payload, setPayload] = useState<ProvisionPayload>({
     ip: '192.168.1.10',
     sessionId: 'S2026-001',
     nmec: '12345',
     timestamp: new Date().toISOString(),
+    ttlSec: '60',
   });
 
   const updateField = useCallback(
-    (field: keyof ExamPayload) => (value: string) =>
-      setPayload(p => ({ ...p, [field]: value })),
+    (field: keyof ProvisionPayload) => (value: string) =>
+      setPayload(prev => ({ ...prev, [field]: value })),
     [],
   );
 
   const setNowTimestamp = useCallback(() => {
-    setPayload(p => ({ ...p, timestamp: new Date().toISOString() }));
+    setPayload(prev => ({ ...prev, timestamp: new Date().toISOString() }));
   }, []);
 
   const activate = useCallback(() => {
-    if (
-      !payload.ip.trim() ||
-      !payload.sessionId.trim() ||
-      !payload.nmec.trim() ||
-      !payload.timestamp.trim()
-    ) {
-      Alert.alert('Incomplete', 'Please fill IP, Session ID, Student ID and Timestamp.');
-      return;
-    }
-
-    const jsonPayload = JSON.stringify({
-      ip: payload.ip.trim(),
-      sessionId: payload.sessionId.trim(),
-      nmec: payload.nmec.trim(),
-      timestamp: payload.timestamp.trim(),
-    });
-
-    if (jsonPayload.length > 240) {
+    if (!nfcHceModule?.setSecureProvisioning) {
       Alert.alert(
-        'Payload too large',
-        `Payload JSON is ${jsonPayload.length} bytes. Keep it compact for APDU transfer.`,
+        'Native module missing',
+        'setSecureProvisioning is unavailable. Rebuild the Android app after native changes.',
       );
       return;
     }
 
-    nfcHceModule?.setExamData?.(jsonPayload);
-    setHceActive(true);
-    setStatus('NFC sender active. Tap the phone to PN532 and request exam data (INS CA).');
-  }, [payload]);
+    if (
+      !payload.ip.trim() ||
+      !payload.sessionId.trim() ||
+      !payload.nmec.trim() ||
+      !payload.timestamp.trim() ||
+      !payload.ttlSec.trim()
+    ) {
+      Alert.alert('Incomplete', 'Please fill all provisioning fields.');
+      return;
+    }
+
+    const ttlParsed = Number(payload.ttlSec);
+    if (!Number.isFinite(ttlParsed) || ttlParsed < 10 || ttlParsed > 600) {
+      Alert.alert('Invalid TTL', 'TTL must be a number between 10 and 600 seconds.');
+      return;
+    }
+
+    const secret = sharedSecretB64u.trim();
+    if (!secret || !isBase64Url(secret)) {
+      Alert.alert('Invalid secret', 'Shared secret must be Base64URL (no spaces, no =).');
+      return;
+    }
+
+    const securePayload = JSON.stringify({
+      ip: payload.ip.trim(),
+      sessionId: payload.sessionId.trim(),
+      nmec: payload.nmec.trim(),
+      timestamp: payload.timestamp.trim(),
+      ttlSec: ttlParsed,
+    });
+
+    nfcHceModule.setSecureProvisioning(securePayload, secret);
+    setActive(true);
+    setStatus('Secure provisioning active. Reader must send INS CB (challenge), then INS CC (token).');
+  }, [payload, sharedSecretB64u]);
 
   const deactivate = useCallback(() => {
     nfcHceModule?.clearExamData?.();
-    setHceActive(false);
-    setStatus('NFC sender deactivated.');
+    setActive(false);
+    setStatus('Secure provisioning deactivated.');
   }, []);
 
   return (
     <ScrollView
       contentContainerStyle={[styles.container, { paddingTop: insets.top + 16 }]}
-      keyboardShouldPersistTaps="handled">
-
+      keyboardShouldPersistTaps="handled"
+    >
       <View style={styles.hero}>
         <Image
           source={require('./assests/PIE_Provisioner_logo_round.png')}
@@ -129,12 +146,26 @@ function AppContent(): React.JSX.Element {
       </View>
 
       <View style={styles.infoCard}>
-        <Text style={styles.infoTitle}>APDU Commands</Text>
+        <Text style={styles.infoTitle}>Secure APDU Commands</Text>
         <Text style={styles.infoText}>SELECT AID: INS A4</Text>
-        <Text style={styles.infoText}>GET EXAM DATA: INS CA</Text>
+        <Text style={styles.infoText}>SET READER CHALLENGE: INS CB</Text>
+        <Text style={styles.infoText}>GET PROVISION TOKEN: INS CC</Text>
+        <Text style={styles.infoText}>TODO: read shared secret from server (temporary manual paste for now).</Text>
       </View>
 
       <View style={styles.card}>
+        <Text style={styles.label}>Shared Secret (Base64URL)</Text>
+        <TextInput
+          style={styles.input}
+          value={sharedSecretB64u}
+          onChangeText={setSharedSecretB64u}
+          placeholder="Temporary: paste secret shown by reader_script.py"
+          placeholderTextColor="#aaa"
+          autoCapitalize="none"
+          autoCorrect={false}
+          editable={!active}
+        />
+
         <Text style={styles.label}>Exam Server IP Address</Text>
         <TextInput
           style={styles.input}
@@ -142,7 +173,7 @@ function AppContent(): React.JSX.Element {
           onChangeText={updateField('ip')}
           placeholder="e.g. 192.168.1.10"
           placeholderTextColor="#aaa"
-          editable={!hceActive}
+          editable={!active}
         />
 
         <Text style={styles.label}>Session ID</Text>
@@ -152,7 +183,7 @@ function AppContent(): React.JSX.Element {
           onChangeText={updateField('sessionId')}
           placeholder="e.g. S2026-001"
           placeholderTextColor="#aaa"
-          editable={!hceActive}
+          editable={!active}
         />
 
         <Text style={styles.label}>Student ID (NMec)</Text>
@@ -163,7 +194,7 @@ function AppContent(): React.JSX.Element {
           placeholder="e.g. 12345"
           placeholderTextColor="#aaa"
           keyboardType="numeric"
-          editable={!hceActive}
+          editable={!active}
         />
 
         <Text style={styles.label}>Timestamp</Text>
@@ -173,35 +204,43 @@ function AppContent(): React.JSX.Element {
           onChangeText={updateField('timestamp')}
           placeholder="e.g. 2026-04-06T14:20:00.000Z"
           placeholderTextColor="#aaa"
-          editable={!hceActive}
+          editable={!active}
         />
 
-        {!hceActive ? (
+        <Text style={styles.label}>Token TTL (Seconds)</Text>
+        <TextInput
+          style={styles.input}
+          value={payload.ttlSec}
+          onChangeText={updateField('ttlSec')}
+          placeholder="e.g. 60"
+          placeholderTextColor="#aaa"
+          keyboardType="numeric"
+          editable={!active}
+        />
+
+        {!active ? (
           <TouchableOpacity style={styles.secondaryBtn} onPress={setNowTimestamp}>
             <Text style={styles.secondaryBtnText}>Use Current Time</Text>
           </TouchableOpacity>
         ) : null}
       </View>
 
-      <View style={[styles.statusBox, hceActive ? styles.statusOn : styles.statusOff]}>
+      <View style={[styles.statusBox, active ? styles.statusOn : styles.statusOff]}>
         <Text style={styles.statusText}>{status}</Text>
       </View>
 
-      {hceActive ? (
+      {active ? (
         <TouchableOpacity style={styles.deactivateBtn} onPress={deactivate}>
-          <Text style={styles.deactivateBtnText}>Deactivate NFC Sender</Text>
+          <Text style={styles.deactivateBtnText}>Deactivate Secure Provisioning</Text>
         </TouchableOpacity>
       ) : (
         <TouchableOpacity style={styles.activateBtn} onPress={activate}>
-          <Text style={styles.activateBtnText}>Activate NFC Sender</Text>
+          <Text style={styles.activateBtnText}>Activate Secure Provisioning</Text>
         </TouchableOpacity>
       )}
-
     </ScrollView>
   );
 }
-
-// ---- Styles -----------------------------------------------------------------
 
 const BRAND_SAND = '#fff5e6';
 const BRAND_TAUPE = '#90887a';
@@ -284,14 +323,6 @@ const styles = StyleSheet.create({
     color: BRAND_CHARCOAL,
     fontWeight: '600',
     fontSize: 13,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  flex1: {
-    flex: 1,
   },
   statusBox: {
     width: '100%',

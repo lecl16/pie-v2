@@ -46,19 +46,25 @@ Supported APDU commands:
 npm install
 ```
 
-2. Start Metro:
+2. Start Metro only if you want the debug build with Fast Refresh:
 
 ```bash
 npm start
 ```
 
-3. Build/install on Android device:
+3. Build/install a standalone Android release on the device:
 
 ```bash
 npm run android
 ```
 
-4. Keep Metro reachable from device:
+4. If you want to run the debug build instead, use this command and keep Metro reachable from the device:
+
+```bash
+npm run android:dev
+```
+
+5. Keep Metro reachable from device when using the debug build:
 
 ```bash
 adb reverse tcp:8081 tcp:8081
@@ -83,13 +89,6 @@ Run:
 ```bash
 python reader_phase1.py
 ```
-
-Edit the `ContactlessFrontend(...)` target in the script based on your bus:
-
-- UART: `tty:AMA0`
-- USB: `usb`
-- SPI: `spi:spidev0.0`
-- I2C: `i2c:/dev/i2c-1` -->
 
 <!-- ## Android NFC Files
 
