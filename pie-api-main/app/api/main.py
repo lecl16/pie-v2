@@ -102,7 +102,7 @@ async def shutdown_event():
 
 @app.get("/")
 def read_root():
-    return RedirectResponse(url="https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    return RedirectResponse(url="/docs")
 
 @app.middleware("http")
 async def add_security_headers(request: fastapi.Request, call_next):

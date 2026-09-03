@@ -1,13 +1,14 @@
-version: "3.8"
-
 services:
   app:
     build: .
     container_name: pie_api
     depends_on:
-      - db
-      - redis
-      - elasticsearch
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      elasticsearch:
+        condition: service_started
     env_file:
       - .env
     environment:
@@ -34,6 +35,12 @@ services:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
 
   redis:
     image: redis:7
