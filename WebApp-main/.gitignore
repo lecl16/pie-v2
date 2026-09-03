@@ -1,0 +1,10 @@
+# Ad-hoc audit/debug output, not meant to be tracked
+npm_audit_log.txt
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Editor cruft
+.vscode/
+.idea/
