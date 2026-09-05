@@ -72,7 +72,6 @@ class ExamHceService : HostApduService() {
         }
 
         val response = JSONObject()
-            .put("ip", parsed.optString("ip", ""))
             .put("sessionId", parsed.optString("sessionId", ""))
             .put("nmec", parsed.optString("nmec", ""))
             .put("timestamp", parsed.optString("timestamp", ""))
@@ -112,7 +111,6 @@ class ExamHceService : HostApduService() {
             .put("jti", randomTokenId())
             .put("exp", exp)
             .put("ch", lastReaderChallengeB64u)
-            .put("ip", parsed.optString("ip", ""))
             .put("sid", parsed.optString("sessionId", ""))
             .put("nm", parsed.optString("nmec", ""))
             .put("ts", parsed.optString("timestamp", ""))

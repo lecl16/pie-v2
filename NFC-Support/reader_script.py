@@ -163,7 +163,6 @@ def verify_token(shared_secret: bytes, challenge_b64u: str, payload: dict, used_
     used_ids.add(jti)
 
     return {
-        "ip": token.get("ip", ""),
         "sessionId": token.get("sid", ""),
         "nmec": token.get("nm", ""),
         "timestamp": token.get("ts", ""),

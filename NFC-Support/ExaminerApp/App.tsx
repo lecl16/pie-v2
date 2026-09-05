@@ -26,7 +26,6 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 const { NfcHceModule } = NativeModules;
 
 interface ProvisionPayload {
-  ip: string;
   sessionId: string;
   nmec: string;
   timestamp: string;
@@ -64,7 +63,6 @@ function AppContent(): React.JSX.Element {
   const [sharedSecretB64u, setSharedSecretB64u] = useState('');
 
   const [payload, setPayload] = useState<ProvisionPayload>({
-    ip: '192.168.1.10',
     sessionId: 'S2026-001',
     nmec: '12345',
     timestamp: new Date().toISOString(),
@@ -91,7 +89,6 @@ function AppContent(): React.JSX.Element {
     }
 
     if (
-      !payload.ip.trim() ||
       !payload.sessionId.trim() ||
       !payload.nmec.trim() ||
       !payload.timestamp.trim() ||
@@ -114,7 +111,6 @@ function AppContent(): React.JSX.Element {
     }
 
     const securePayload = JSON.stringify({
-      ip: payload.ip.trim(),
       sessionId: payload.sessionId.trim(),
       nmec: payload.nmec.trim(),
       timestamp: payload.timestamp.trim(),
@@ -163,16 +159,6 @@ function AppContent(): React.JSX.Element {
           placeholderTextColor="#aaa"
           autoCapitalize="none"
           autoCorrect={false}
-          editable={!active}
-        />
-
-        <Text style={styles.label}>Exam Server IP Address</Text>
-        <TextInput
-          style={styles.input}
-          value={payload.ip}
-          onChangeText={updateField('ip')}
-          placeholder="e.g. 192.168.1.10"
-          placeholderTextColor="#aaa"
           editable={!active}
         />
 
