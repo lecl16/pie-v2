@@ -42,6 +42,5 @@ disable_overscan=1
 
 [all]
 dtoverlay=dwc2,dr_mode=peripheral
-dtoverlay=pn532-i2c
 disable_splash=1
 boot_delay=0
