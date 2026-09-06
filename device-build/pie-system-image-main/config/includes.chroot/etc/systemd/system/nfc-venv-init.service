@@ -1,0 +1,12 @@
+[Unit]
+Description=Initialize NFC reader Python virtualenv (first boot only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/init-nfc-venv.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -2,3 +2,9 @@ vim
 wget
 git
 zip
+python3-venv
+python3-pip
+python3-dev
+build-essential
+swig
+i2c-tools

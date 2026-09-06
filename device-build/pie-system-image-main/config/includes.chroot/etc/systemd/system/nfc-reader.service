@@ -1,0 +1,18 @@
+[Unit]
+Description=PIE NFC provisioning reader
+After=nfc-venv-init.service
+Requires=nfc-venv-init.service
+
+[Service]
+Type=simple
+# Runs as root: needs raw /dev/i2c-1 access for the PN532, and this is a
+# narrowly-scoped local hardware helper, not a network-facing service.
+ExecStart=/opt/nfc-reader/venv/bin/python /opt/nfc-reader/reader_script.py
+WorkingDirectory=/opt/nfc-reader
+Restart=always
+RestartSec=5
+StartLimitInterval=200
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target
