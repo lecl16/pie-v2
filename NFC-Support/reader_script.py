@@ -8,7 +8,9 @@ import time
 from hashlib import sha256
 from pathlib import Path
 
-import nfc
+import board
+import busio
+from adafruit_pn532.i2c import PN532_I2C
 
 AID = bytes([0xF0, 0x45, 0x58, 0x4D, 0x41, 0x50, 0x50, 0x31])
 
@@ -17,6 +19,15 @@ INS_SET_READER_CHALLENGE = 0xCB
 INS_GET_PROVISION_TOKEN = 0xCC
 
 SW_SUCCESS = b"\x90\x00"
+
+# PN532 host commands/status bits used to drive InDataExchange directly, since
+# nfcpy has no I2C transport at all (only TTY/USB — see nfc/clf/pn532.py's
+# init()/nfc/clf/transport.py upstream) and this reader is wired over I2C.
+PN532_INS_INDATAEXCHANGE = 0x40
+PN532_TARGET_NUMBER = 0x01
+PN532_STATUS_ERROR_MASK = 0x3F
+PN532_STATUS_MORE_INFO_BIT = 0x40
+PN532_EXCHANGE_RESPONSE_LENGTH = 262  # PN532 frame payload ceiling per InDataExchange call
 
 SECRET_FILE = Path(__file__).with_name("provision_secret.txt")
 USED_TOKEN_FILE = Path(__file__).with_name("used_token_ids.json")
@@ -175,6 +186,48 @@ SHARED_SECRET = load_or_create_secret()
 USED_IDS = load_used_token_ids()
 
 
+def init_pn532() -> PN532_I2C:
+    i2c = busio.I2C(board.SCL, board.SDA)
+    pn532 = PN532_I2C(i2c, debug=False)
+    ic, ver, rev, support = pn532.firmware_version
+    print(f"PN532 firmware v{ver}.{rev} detected (IC 0x{ic:02X}).")
+    pn532.SAM_configuration()
+    return pn532
+
+
+class Type4TagSession:
+    """Adapts PN532 InDataExchange to the `tag.transceive(apdu)` interface
+    on_connect() expects, handling the PN532's MI-bit frame chaining so a
+    response longer than one PN532 frame is reassembled transparently."""
+
+    def __init__(self, pn532: PN532_I2C, target: int = PN532_TARGET_NUMBER):
+        self._pn532 = pn532
+        self._target = target
+
+    def transceive(self, apdu: bytes) -> bytes:
+        response = bytearray()
+        params = bytes([self._target]) + bytes(apdu)
+        while True:
+            raw = self._pn532.call_function(
+                PN532_INS_INDATAEXCHANGE,
+                params=params,
+                response_length=PN532_EXCHANGE_RESPONSE_LENGTH,
+            )
+            if not raw:
+                raise RuntimeError("InDataExchange: no response from PN532")
+
+            status, data = raw[0], raw[1:]
+            if status & PN532_STATUS_ERROR_MASK != 0x00:
+                raise RuntimeError(f"InDataExchange error status=0x{status:02X}")
+
+            response += data
+            if not status & PN532_STATUS_MORE_INFO_BIT:
+                break
+            params = bytes([self._target])  # empty payload requests the next chained frame
+
+        return bytes(response)
+
+
 def on_connect(tag):
     try:
         if HARD_LOCK_MODE and not is_window_open():
@@ -286,10 +339,19 @@ def main():
             print("Hard lock mode ON. Window closed. Run with --arm to accept provisioning.")
 
     # Integration of the NFC module through I2C.
-    with nfc.ContactlessFrontend("i2c:/dev/i2c-1") as clf:
-        print("Waiting for examiner phone...")
-        while True:
-            clf.connect(rdwr={"on-connect": on_connect})
+    pn532 = init_pn532()
+    print("Waiting for examiner phone...")
+    while True:
+        uid = pn532.read_passive_target(timeout=0.5)
+        if uid is None:
+            continue
+
+        on_connect(Type4TagSession(pn532))
+
+        # Wait for the phone to be pulled away so one physical tap isn't
+        # processed repeatedly while it's still sitting on the reader.
+        while pn532.read_passive_target(timeout=0.5) is not None:
+            time.sleep(0.2)
 
 
 if __name__ == "__main__":
