@@ -73,7 +73,28 @@ app.include_router(exam_router, prefix="/course/{course_id}", tags=["exam"], dep
 app.include_router(session_router, prefix="/course/{course_id}/{exam_id}", tags=["session"], dependencies=[Depends(get_current_user)])
 app.include_router(session_user_router, prefix="/session-users", tags=["session-users"], dependencies=[Depends(get_current_user)])
 app.include_router(submission_router, prefix="/submission", tags=["submission"], dependencies=[Depends(get_current_user)])
-app.include_router(device_router, prefix="/device", tags=["device"], dependencies=[Depends(get_current_user)])
+
+# Create teacher/admin-only device router for /create — it now mints device
+# API-key credentials, so it can't stay open to any authenticated user.
+teacher_device_router = fastapi.APIRouter()
+for route in device_router.routes:
+    if route.path == "/create":
+        teacher_device_router.routes.append(route)
+
+app.include_router(
+    teacher_device_router,
+    prefix="/device",
+    tags=["device"],
+    dependencies=[Depends(get_teacher_or_admin_user)]
+)
+
+# Create protected device router without the create route
+protected_device_router = fastapi.APIRouter()
+for route in device_router.routes:
+    if route.path != "/create":
+        protected_device_router.routes.append(route)
+
+app.include_router(protected_device_router, prefix="/device", tags=["device"], dependencies=[Depends(get_current_user)])
 app.include_router(screenshare_router, prefix="/screenshare", tags=["screenshare"])
 app.include_router(logs_router, prefix="/logs", tags=["logs"], dependencies=[Depends(get_current_user)])
 app.include_router(analytics_router, prefix="/analytics", tags=["analytics"], dependencies=[Depends(get_teacher_or_admin_user)])

@@ -2,21 +2,30 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from app.core.database import get_db
+from app.core.security import generate_device_api_key, hash_device_key
 from app.models.db.device import Device
-from app.schemas.device import DeviceCreate, DeviceUpdate, DeviceOut
+from app.schemas.device import DeviceCreate, DeviceUpdate, DeviceOut, DeviceCreated
 
 router = APIRouter()
 
-@router.post("/create", response_model=DeviceOut)
+@router.post("/create", response_model=DeviceCreated)
 def create_device(device: DeviceCreate, db: Session = Depends(get_db)):
-    db_device = Device(**device.dict())
+    api_key = generate_device_api_key()
+    db_device = Device(**device.dict(), device_api_key_hash=hash_device_key(api_key))
     try:
         db.add(db_device)
         db.commit()
         db.refresh(db_device)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return db_device
+    return DeviceCreated(
+        id=db_device.id,
+        name=db_device.name,
+        last_ip=db_device.last_ip,
+        last_online=db_device.last_online,
+        last_update=db_device.last_update,
+        api_key=api_key,
+    )
 
 @router.get("/", response_model=List[DeviceOut])
 def read_devices(db: Session = Depends(get_db)):

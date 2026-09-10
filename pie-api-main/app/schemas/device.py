@@ -13,7 +13,11 @@ class DeviceOut(DeviceBase):
     last_ip: Optional[str] = None
     last_online: Optional[datetime] = None
     last_update: Optional[datetime] = None
-    
+
+class DeviceCreated(DeviceOut):
+    api_key: str
+
+
 class DeviceUpdate(DeviceBase):
     pass
 

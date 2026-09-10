@@ -1,16 +1,18 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.models.db.device import Device
 from app.models.db.user import User
 from app.schemas.user import UserOut
 from app.core.config import config
+from app.core.security import hash_device_key
 
 # Change these settings in production
 SECRET_KEY = config.SECRET_KEY
@@ -70,7 +72,19 @@ def get_admin_user(current_user: User = Depends(get_current_user)):
 def get_teacher_or_admin_user(current_user: User = Depends(get_current_user)):
     if current_user.role not in ["admin", "teacher"]:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, 
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
     return current_user
+
+def get_device(x_device_key: str = Header(..., alias="X-Device-Key"), db: Session = Depends(get_db)) -> Device:
+    # Authenticate exam device via it API key, sent in the X-Device-Key header
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid device credentials",
+    )
+    key_hash = hash_device_key(x_device_key)
+    device = db.query(Device).filter(Device.device_api_key_hash == key_hash).first()
+    if device is None:
+        raise credentials_exception
+    return device

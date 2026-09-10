@@ -326,3 +326,11 @@ def verify_hmac(session_key, message, provided_hmac):
 
 def format_hmac_for_storage(hmac_digest: bytes) -> str:
     return base64.urlsafe_b64encode(hmac_digest).decode('utf-8')
+
+def generate_device_api_key() -> str:
+    # Generate a new plaintext device API key
+    return secrets.token_urlsafe(32)
+
+def hash_device_key(key: str) -> str:
+    # Hash device API key for storage/lookup
+    return hashlib.sha256(key.encode('utf-8')).hexdigest()
