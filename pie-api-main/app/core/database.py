@@ -28,20 +28,6 @@ def get_db():
         db.close()
 
 def _sync_existing_tables(connection):
-    """Adds columns/indexes that a model declares but an already-existing
-    table is still missing, so a deployment that's already running picks up
-    a model change (e.g. a new column) on its next restart without a manual
-    migration step.
-
-    `alembic` is in requirements.txt but was never actually wired up (no
-    `alembic.ini`/versions directory) — setting that up properly, including
-    baseline-stamping every already-deployed database, is more moving parts
-    than this single-operator, self-hosted deployment model calls for. This
-    covers the same gap `create_all` leaves open (it only creates whole
-    tables that don't exist yet, never alters existing ones) with the same
-    zero-touch-for-the-operator approach `create_all`/`scripts/setup.sh`
-    already use elsewhere.
-    """
     inspector = inspect(connection)
     for table in Base.metadata.sorted_tables:
         if not inspector.has_table(table.name):
