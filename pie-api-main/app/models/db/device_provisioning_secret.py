@@ -8,6 +8,11 @@ class DeviceProvisioningSecret(Base):
     device_id = Column(Integer, ForeignKey("device.id", ondelete="CASCADE"), nullable=False)
     session_id = Column(Integer, ForeignKey("session.id", ondelete="CASCADE"), nullable=False)
     secret = Column(String(255), nullable=False)
+    # Examiner-assigned student (docs/tap-gated-student-join.md): the only
+    # NMEC allowed to join this session from this device. Nullable only
+    # because _sync_existing_tables() adds it to rows registered before it
+    # existed; registration always sets it, and a join rejects a row without it.
+    nmec = Column(Integer, nullable=True)
     expires_at = Column(DateTime, nullable=False)
     claimed_at = Column(DateTime, nullable=True)
 

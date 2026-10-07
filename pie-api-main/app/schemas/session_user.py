@@ -7,8 +7,14 @@ class SessionUserBase(BaseModel):
     # session_id: int
     device_id: int
 
-class SessionUserCreate(SessionUserBase):
+class SessionUserCreate(BaseModel):
+    """The joining student comes from the JWT, not the body; `nonce`/`mac`
+    prove the join comes from the device the examiner tapped for this
+    student — see docs/tap-gated-student-join.md section 5."""
     join_code: str
+    device_id: int
+    nonce: str
+    mac: str
 
 class SessionUserOut(SessionUserBase):
     id: int

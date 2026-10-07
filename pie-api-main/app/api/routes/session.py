@@ -8,8 +8,16 @@ from app.models.db.exam import Exam as dbExam
 from app.models.db.course import Course as dbCourse
 from app.models.db.submission import Submission
 from app.models.db.session_user import SessionUser
+from app.models.db.device_provisioning_secret import DeviceProvisioningSecret
 from app.schemas.session import SessionCreate, SessionUpdate, SessionOut, SessionUpload
 from app.schemas.submission import SubmissionOut
+from app.models.db.device import Device
+from app.models.db.user import User
+from app.schemas.device_provisioning_secret import (
+    DeviceProvisioningSecretRegister,
+    DeviceProvisioningSecretRegistered,
+)
+from app.core.auth import get_teacher_or_admin_user
 import os
 import mimetypes
 import zipfile
@@ -761,6 +769,106 @@ async def end_session(
             await redis_pubsub.publish(f"pie:{user.user_nmec}", message_end)
     except Exception as e:
         logger.error(f"Error ending exam: {str(e)}")
-        
+
     return db_session
 
+def _get_session_or_404(db: Session, course_id: str, exam_id: int, session_id: int):
+    db_session = db.query(dbSession).filter(
+        dbSession.id == session_id,
+        dbSession.course_id == course_id,
+        dbSession.exam_id == exam_id,
+    ).first()
+    if db_session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return db_session
+
+@router.post("/{session_id}/device/{device_id}/provisioning-secret", response_model=DeviceProvisioningSecretRegistered)
+def register_provisioning_secret(
+    course_id: str,
+    exam_id: int,
+    session_id: int,
+    device_id: int,
+    payload: DeviceProvisioningSecretRegister,
+    db: Session = Depends(get_db),
+    _current_user=Depends(get_teacher_or_admin_user),  # explicit: session_router's own
+    # default dependency is get_current_user (any authenticated role), not
+    # teacher/admin, and this registers an NFC provisioning secret.
+):
+    """The examiner app, as the trusted node, registers the secret it just
+    generated before delivering the same secret to the device over NFC — see
+    docs/examiner-trusted-node-provisioning.md section 2. It also assigns
+    the student (`nmec`) the examiner seated at this device after checking
+    their card; only that student can later join the session from this
+    device (docs/tap-gated-student-join.md). Happens before the student
+    joins, so no SessionUser is needed. Re-registering for the same device
+    and session replaces the previous secret and student and resets it to
+    unconfirmed, so a wrong NMEC can be fixed before the student joins."""
+    db_session = _get_session_or_404(db, course_id, exam_id, session_id)
+
+    if db.query(Device).filter(Device.id == device_id).first() is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    student = db.query(User).filter(User.nmec == payload.nmec).first()
+    if student is None or student.role != "student":
+        raise HTTPException(status_code=404, detail="Student not found")
+    # Same rule create_session_user applies at join time — fail here, while
+    # the examiner is still at the seat, rather than when the student joins.
+    if db_session.allowed_students and student.email not in db_session.allowed_students:
+        raise HTTPException(status_code=400, detail="Student not allowed in session")
+
+    try:
+        secret_len = len(base64.urlsafe_b64decode(payload.secret + "=" * (-len(payload.secret) % 4)))
+    except Exception:
+        secret_len = 0
+    if secret_len < 32:
+        raise HTTPException(status_code=422, detail="Secret must be at least 32 bytes, base64url-encoded")
+
+    expires_at = datetime.utcnow() + timedelta(seconds=payload.ttl_seconds)
+    existing = db.query(DeviceProvisioningSecret).filter(
+        DeviceProvisioningSecret.device_id == device_id,
+        DeviceProvisioningSecret.session_id == session_id,
+    ).first()
+    if existing:
+        existing.secret = payload.secret
+        existing.nmec = payload.nmec
+        existing.expires_at = expires_at
+        existing.claimed_at = None
+    else:
+        db.add(DeviceProvisioningSecret(
+            device_id=device_id,
+            session_id=session_id,
+            secret=payload.secret,
+            nmec=payload.nmec,
+            expires_at=expires_at,
+        ))
+    db.commit()
+
+    return DeviceProvisioningSecretRegistered(
+        sessionId=str(session_id),
+        nmec=str(payload.nmec),
+    )
+
+@router.delete("/{session_id}/device/{device_id}/provisioning-secret", status_code=200)
+def invalidate_provisioning_secret(
+    course_id: str,
+    exam_id: int,
+    session_id: int,
+    device_id: int,
+    db: Session = Depends(get_db),
+    _current_user=Depends(get_teacher_or_admin_user),
+):
+    """The examiner backed out before tapping — drop the secret so it can't
+    be confirmed later. A confirmed secret is kept: the student's join
+    checks it (docs/tap-gated-student-join.md), and the examiner app calls
+    this on "Deactivate" whether or not the tap went through."""
+    _get_session_or_404(db, course_id, exam_id, session_id)
+    secret_row = db.query(DeviceProvisioningSecret).filter(
+        DeviceProvisioningSecret.device_id == device_id,
+        DeviceProvisioningSecret.session_id == session_id,
+    ).first()
+    if secret_row is not None and secret_row.claimed_at is not None:
+        return {"status": "kept"}
+    if secret_row is not None:
+        db.delete(secret_row)
+        db.commit()
+    return {"status": "invalidated"}

@@ -74,11 +74,24 @@ app.include_router(session_router, prefix="/course/{course_id}/{exam_id}", tags=
 app.include_router(session_user_router, prefix="/session-users", tags=["session-users"], dependencies=[Depends(get_current_user)])
 app.include_router(submission_router, prefix="/submission", tags=["submission"], dependencies=[Depends(get_current_user)])
 
-# Create teacher/admin-only device router for /create — it now mints device
-# API-key credentials, so it can't stay open to any authenticated user.
+# Create teacher/admin-only device router for the routes that mint or
+# revoke device API-key credentials, or destroy a device's identity outright
+# — none of these can stay open to any authenticated user. Matched by
+# (path, method) rather than path alone, since DELETE /{device_id} shares
+# its path with the GET/PUT routes that are intentionally left at the
+# broader get_current_user level below.
+TEACHER_ONLY_DEVICE_ROUTES = {
+    ("/create", "POST"),
+    ("/{device_id}/rotate-key", "POST"),
+    ("/{device_id}", "DELETE"),
+}
+
+def _device_route_matches(route, wanted_path_methods) -> bool:
+    return any((route.path, method) in wanted_path_methods for method in route.methods)
+
 teacher_device_router = fastapi.APIRouter()
 for route in device_router.routes:
-    if route.path == "/create":
+    if _device_route_matches(route, TEACHER_ONLY_DEVICE_ROUTES):
         teacher_device_router.routes.append(route)
 
 app.include_router(
@@ -88,10 +101,30 @@ app.include_router(
     dependencies=[Depends(get_teacher_or_admin_user)]
 )
 
-# Create protected device router without the create route
+# Routes called by the exam device itself, which has no JWT to satisfy
+# get_current_user — mounted with no router-level auth dependency. Each one
+# authenticates in its own body (the confirm route checks an HMAC proof of
+# the session's provisioning secret, see docs/examiner-trusted-node-provisioning.md;
+# the status route takes the device's X-Device-Key).
+DEVICE_SELF_AUTH_PATHS = {
+    "/{device_id}/provisioning-secret/{session_id}/confirm",
+    "/{device_id}/session/{session_id}/status",  # X-Device-Key (get_device)
+}
+device_self_auth_router = fastapi.APIRouter()
+for route in device_router.routes:
+    if route.path in DEVICE_SELF_AUTH_PATHS:
+        device_self_auth_router.routes.append(route)
+
+app.include_router(device_self_auth_router, prefix="/device", tags=["device"])
+
+# Create protected device router without the teacher-only routes or the
+# device-self-authenticated routes above
 protected_device_router = fastapi.APIRouter()
 for route in device_router.routes:
-    if route.path != "/create":
+    if (
+        not _device_route_matches(route, TEACHER_ONLY_DEVICE_ROUTES)
+        and route.path not in DEVICE_SELF_AUTH_PATHS
+    ):
         protected_device_router.routes.append(route)
 
 app.include_router(protected_device_router, prefix="/device", tags=["device"], dependencies=[Depends(get_current_user)])

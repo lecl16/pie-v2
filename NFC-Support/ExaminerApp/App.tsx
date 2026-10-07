@@ -1,10 +1,15 @@
 /**
  * @format
  *
- * Secure provisioning app flow:
- * 1) Examiner fills payload + shared secret.
- * 2) App enables HCE secure mode.
- * 3) Reader sends challenge APDU and then requests signed token APDU.
+ * Secure provisioning app flow — this app is the trusted node (see
+ * pie-api-main/docs/examiner-trusted-node-provisioning.md):
+ * 1) Examiner logs in (teacher/admin JWT, same as WebApp).
+ * 2) App generates a session secret and registers it with pie-api-main for
+ *    one device + session.
+ * 3) App enables HCE secure mode with that secret, the session data and the
+ *    server URL.
+ * 4) Reader sends its per-tap public key (INS CB), then requests the
+ *    encrypted payload (INS CC), then confirms the secret with the server.
  */
 
 import React, { useCallback, useState } from 'react';
@@ -25,23 +30,39 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 
 const { NfcHceModule } = NativeModules;
 
-interface ProvisionPayload {
+// Matches ExamHceService.kt's handleGetProvisionToken(), which reads
+// sessionId/nmec/apiBaseUrl/ttlSec from this JSON and ignores anything else.
+// ttlSec only governs how long the encrypted payload built at tap time is
+// valid for, so it stays a fixed local default.
+const TOKEN_TTL_SECONDS = 60;
+
+// How long the server keeps the registered secret confirmable — i.e. how
+// long the examiner has to tap after activating. Matches the reader's
+// MAX_WINDOW_SECONDS.
+const SECRET_TTL_SECONDS = 300;
+
+interface ProvisionRegistration {
   sessionId: string;
   nmec: string;
-  timestamp: string;
-  ttlSec: string;
 }
 
 interface NativeHceModule {
+  generateSecret?: () => Promise<string>;
   setSecureProvisioning?: (payloadJson: string, sharedSecretBase64Url: string) => void;
   clearExamData?: () => void;
+  setPendingDeviceIdentity?: (identityJson: string) => void;
+  clearPendingDeviceIdentity?: () => void;
+}
+
+// Matches ExamHceService.kt's handleGetDeviceIdentity(), which reads exactly
+// these three fields and ignores anything else.
+interface DeviceIdentity {
+  deviceId: number;
+  apiKey: string;
+  apiBaseUrl: string;
 }
 
 const nfcHceModule = NfcHceModule as NativeHceModule | undefined;
-
-function isBase64Url(input: string): boolean {
-  return /^[A-Za-z0-9_-]+$/.test(input);
-}
 
 function App(): React.JSX.Element {
   const isDarkMode = useColorScheme() === 'dark';
@@ -57,75 +78,229 @@ function AppContent(): React.JSX.Element {
   const insets = useSafeAreaInsets();
 
   const [active, setActive] = useState(false);
-  const [status, setStatus] = useState('Fill fields and activate secure provisioning.');
-  // TODO(server-integration): Replace manual secret entry with a fetch from backend.
-  // The expected flow is: reader uploads secret to server, app retrieves it for this exam/session.
-  const [sharedSecretB64u, setSharedSecretB64u] = useState('');
+  const [status, setStatus] = useState('Log in, then pick a device to provision.');
+  const [busy, setBusy] = useState(false);
 
-  const [payload, setPayload] = useState<ProvisionPayload>({
-    sessionId: 'S2026-001',
-    nmec: '12345',
-    timestamp: new Date().toISOString(),
-    ttlSec: '60',
-  });
+  const [apiBaseUrl, setApiBaseUrl] = useState('http://REPLACE-WITH-YOUR-PIE-API-HOST:8000');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [loggedInAs, setLoggedInAs] = useState<string | null>(null);
 
-  const updateField = useCallback(
-    (field: keyof ProvisionPayload) => (value: string) =>
-      setPayload(prev => ({ ...prev, [field]: value })),
-    [],
+  const [courseId, setCourseId] = useState('');
+  const [examId, setExamId] = useState('');
+  const [sessionId, setSessionId] = useState('');
+  const [deviceId, setDeviceId] = useState('');
+  const [studentNmec, setStudentNmec] = useState('');
+
+  const [newDeviceName, setNewDeviceName] = useState('');
+  const [deviceBusy, setDeviceBusy] = useState(false);
+  const [pendingIdentity, setPendingIdentity] = useState<{ id: number; name: string } | null>(
+    null,
+  );
+  const [deviceStatus, setDeviceStatus] = useState(
+    'Provisioning a new device holds its identity here until the next NFC tap.',
   );
 
-  const setNowTimestamp = useCallback(() => {
-    setPayload(prev => ({ ...prev, timestamp: new Date().toISOString() }));
+  const login = useCallback(async () => {
+    if (!apiBaseUrl.trim() || !email.trim() || !password) {
+      Alert.alert('Incomplete', 'Please fill server URL, email and password.');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const response = await fetch(`${apiBaseUrl.trim().replace(/\/$/, '')}/users/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`Login failed (HTTP ${response.status}): ${detail}`);
+      }
+
+      const data = await response.json();
+      setAccessToken(data.access_token);
+      setLoggedInAs(data.email ?? email.trim());
+      setStatus('Logged in. Fill in course/exam/session/device to provision.');
+    } catch (err) {
+      Alert.alert('Login failed', err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBaseUrl, email, password]);
+
+  const logout = useCallback(() => {
+    setAccessToken(null);
+    setLoggedInAs(null);
+    setStatus('Logged out.');
   }, []);
 
-  const activate = useCallback(() => {
-    if (!nfcHceModule?.setSecureProvisioning) {
+  const provisioningSecretUrl = useCallback(
+    () =>
+      `${apiBaseUrl.trim().replace(/\/$/, '')}/course/${encodeURIComponent(courseId.trim())}` +
+      `/${encodeURIComponent(examId.trim())}/${encodeURIComponent(sessionId.trim())}` +
+      `/device/${encodeURIComponent(deviceId.trim())}/provisioning-secret`,
+    [apiBaseUrl, courseId, examId, sessionId, deviceId],
+  );
+
+  const registerAndActivate = useCallback(async () => {
+    if (!nfcHceModule?.setSecureProvisioning || !nfcHceModule?.generateSecret) {
       Alert.alert(
         'Native module missing',
-        'setSecureProvisioning is unavailable. Rebuild the Android app after native changes.',
+        'generateSecret/setSecureProvisioning is unavailable. Rebuild the Android app after native changes.',
       );
       return;
     }
-
+    if (!accessToken) {
+      Alert.alert('Not logged in', 'Log in first.');
+      return;
+    }
     if (
-      !payload.sessionId.trim() ||
-      !payload.nmec.trim() ||
-      !payload.timestamp.trim() ||
-      !payload.ttlSec.trim()
+      !courseId.trim() ||
+      !examId.trim() ||
+      !sessionId.trim() ||
+      !deviceId.trim() ||
+      !studentNmec.trim()
     ) {
-      Alert.alert('Incomplete', 'Please fill all provisioning fields.');
+      Alert.alert('Incomplete', 'Please fill course, exam, session, device IDs and student NMEC.');
       return;
     }
 
-    const ttlParsed = Number(payload.ttlSec);
-    if (!Number.isFinite(ttlParsed) || ttlParsed < 10 || ttlParsed > 600) {
-      Alert.alert('Invalid TTL', 'TTL must be a number between 10 and 600 seconds.');
-      return;
+    setBusy(true);
+    try {
+      // This app is the trusted node: it generates the secret, gives it to
+      // the server here, and to the device in the NFC tap.
+      const secret = await nfcHceModule.generateSecret();
+
+      const response = await fetch(provisioningSecretUrl(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        // The examiner assigns this student to this device after checking
+        // their card (pie-api-main/docs/tap-gated-student-join.md): the
+        // server only lets this NMEC join the session from this device.
+        body: JSON.stringify({
+          secret,
+          ttl_seconds: SECRET_TTL_SECONDS,
+          nmec: studentNmec.trim(),
+        }),
+      });
+
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`Registration failed (HTTP ${response.status}): ${detail}`);
+      }
+
+      const data: ProvisionRegistration = await response.json();
+
+      const securePayload = JSON.stringify({
+        sessionId: data.sessionId,
+        nmec: studentNmec.trim(),
+        apiBaseUrl: apiBaseUrl.trim().replace(/\/$/, ''),
+        ttlSec: TOKEN_TTL_SECONDS,
+      });
+
+      nfcHceModule.setSecureProvisioning(securePayload, secret);
+      setActive(true);
+      setStatus(
+        `Secure provisioning active for device ${deviceId.trim()} (session ${sessionId.trim()}, ` +
+          `student ${studentNmec.trim()}). ` +
+          `Arm the device's reader and tap within ${SECRET_TTL_SECONDS / 60} minutes.`,
+      );
+    } catch (err) {
+      Alert.alert('Registration failed', err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
     }
-
-    const secret = sharedSecretB64u.trim();
-    if (!secret || !isBase64Url(secret)) {
-      Alert.alert('Invalid secret', 'Shared secret must be Base64URL (no spaces, no =).');
-      return;
-    }
-
-    const securePayload = JSON.stringify({
-      sessionId: payload.sessionId.trim(),
-      nmec: payload.nmec.trim(),
-      timestamp: payload.timestamp.trim(),
-      ttlSec: ttlParsed,
-    });
-
-    nfcHceModule.setSecureProvisioning(securePayload, secret);
-    setActive(true);
-    setStatus('Secure provisioning active. Reader must send INS CB (challenge), then INS CC (token).');
-  }, [payload, sharedSecretB64u]);
+  }, [
+    accessToken,
+    apiBaseUrl,
+    courseId,
+    examId,
+    sessionId,
+    deviceId,
+    studentNmec,
+    provisioningSecretUrl,
+  ]);
 
   const deactivate = useCallback(() => {
     nfcHceModule?.clearExamData?.();
     setActive(false);
     setStatus('Secure provisioning deactivated.');
+
+    // Best-effort: drop the registered secret so it can no longer be
+    // confirmed. If the tap already went through it's single-use anyway.
+    if (accessToken) {
+      fetch(provisioningSecretUrl(), {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).catch(() => {});
+    }
+  }, [accessToken, provisioningSecretUrl]);
+
+  const createAndHoldDeviceIdentity = useCallback(async () => {
+    if (!nfcHceModule?.setPendingDeviceIdentity) {
+      Alert.alert(
+        'Native module missing',
+        'setPendingDeviceIdentity is unavailable. Rebuild the Android app after native changes.',
+      );
+      return;
+    }
+    if (!accessToken) {
+      Alert.alert('Not logged in', 'Log in first.');
+      return;
+    }
+    if (!newDeviceName.trim()) {
+      Alert.alert('Incomplete', 'Please name the new device.');
+      return;
+    }
+
+    setDeviceBusy(true);
+    try {
+      const trimmedBaseUrl = apiBaseUrl.trim().replace(/\/$/, '');
+      const response = await fetch(`${trimmedBaseUrl}/device/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ name: newDeviceName.trim() }),
+      });
+
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`Device creation failed (HTTP ${response.status}): ${detail}`);
+      }
+
+      const data: { id: number; api_key: string } = await response.json();
+      const identity: DeviceIdentity = {
+        deviceId: data.id,
+        apiKey: data.api_key,
+        apiBaseUrl: trimmedBaseUrl,
+      };
+
+      nfcHceModule.setPendingDeviceIdentity(JSON.stringify(identity));
+      setPendingIdentity({ id: data.id, name: newDeviceName.trim() });
+      setDeviceStatus(
+        `Holding identity for device #${data.id} ("${newDeviceName.trim()}"). ` +
+          'Tap the phone against the unclaimed device now — single use.',
+      );
+    } catch (err) {
+      Alert.alert('Device creation failed', err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeviceBusy(false);
+    }
+  }, [accessToken, apiBaseUrl, newDeviceName]);
+
+  const cancelPendingIdentity = useCallback(() => {
+    nfcHceModule?.clearPendingDeviceIdentity?.();
+    setPendingIdentity(null);
+    setDeviceStatus('Provisioning cancelled — identity discarded, no tap will claim it now.');
   }, []);
 
   return (
@@ -144,71 +319,166 @@ function AppContent(): React.JSX.Element {
       <View style={styles.infoCard}>
         <Text style={styles.infoTitle}>Secure APDU Commands</Text>
         <Text style={styles.infoText}>SELECT AID: INS A4</Text>
-        <Text style={styles.infoText}>SET READER CHALLENGE: INS CB</Text>
-        <Text style={styles.infoText}>GET PROVISION TOKEN: INS CC</Text>
-        <Text style={styles.infoText}>TODO: read shared secret from server (temporary manual paste for now).</Text>
+        <Text style={styles.infoText}>SET READER KEY: INS CB</Text>
+        <Text style={styles.infoText}>GET PROVISION TOKEN (encrypted): INS CC</Text>
+        <Text style={styles.infoText}>GET DEVICE IDENTITY (encrypted): INS CD</Text>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.label}>Shared Secret (Base64URL)</Text>
+        <Text style={styles.label}>PIE API Server URL</Text>
         <TextInput
           style={styles.input}
-          value={sharedSecretB64u}
-          onChangeText={setSharedSecretB64u}
-          placeholder="Temporary: paste secret shown by reader_script.py"
+          value={apiBaseUrl}
+          onChangeText={setApiBaseUrl}
+          placeholder="http://your-pie-api-host:8000"
           placeholderTextColor="#aaa"
           autoCapitalize="none"
           autoCorrect={false}
+          editable={!accessToken}
+        />
+
+        {!accessToken ? (
+          <>
+            <Text style={styles.label}>Email</Text>
+            <TextInput
+              style={styles.input}
+              value={email}
+              onChangeText={setEmail}
+              placeholder="teacher@example.com"
+              placeholderTextColor="#aaa"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+            />
+
+            <Text style={styles.label}>Password</Text>
+            <TextInput
+              style={styles.input}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Password"
+              placeholderTextColor="#aaa"
+              secureTextEntry
+            />
+
+            <TouchableOpacity
+              style={[styles.secondaryBtn, busy && styles.btnDisabled]}
+              onPress={login}
+              disabled={busy}
+            >
+              <Text style={styles.secondaryBtnText}>{busy ? 'Logging in...' : 'Log In'}</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <Text style={styles.infoText}>Logged in as {loggedInAs}</Text>
+            <TouchableOpacity style={styles.secondaryBtn} onPress={logout}>
+              <Text style={styles.secondaryBtnText}>Log Out</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+
+      {accessToken ? (
+        <View style={styles.card}>
+          <Text style={styles.infoTitle}>Provision New Device</Text>
+          <Text style={styles.infoText}>
+            Mints a device identity and holds it here until you tap the phone
+            against a freshly-flashed, unclaimed device — see
+            device-identity-nfc-bootstrap.md.
+          </Text>
+
+          <Text style={styles.label}>Device Name</Text>
+          <TextInput
+            style={styles.input}
+            value={newDeviceName}
+            onChangeText={setNewDeviceName}
+            placeholder="e.g. Sala 101 - PC03"
+            placeholderTextColor="#aaa"
+            editable={!pendingIdentity}
+          />
+
+          <View style={[styles.statusBox, pendingIdentity ? styles.statusOn : styles.statusOff]}>
+            <Text style={styles.statusText}>{deviceStatus}</Text>
+          </View>
+
+          {pendingIdentity ? (
+            <TouchableOpacity style={styles.deactivateBtn} onPress={cancelPendingIdentity}>
+              <Text style={styles.deactivateBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[styles.secondaryBtn, deviceBusy && styles.btnDisabled]}
+              onPress={createAndHoldDeviceIdentity}
+              disabled={deviceBusy}
+            >
+              <Text style={styles.secondaryBtnText}>
+                {deviceBusy ? 'Creating...' : 'Create & Hold for Tap'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      ) : null}
+
+      <View style={styles.card}>
+        <Text style={styles.label}>Course ID</Text>
+        <TextInput
+          style={styles.input}
+          value={courseId}
+          onChangeText={setCourseId}
+          placeholder="e.g. CS101"
+          placeholderTextColor="#aaa"
+          autoCapitalize="none"
+          editable={!active}
+        />
+
+        <Text style={styles.label}>Exam ID</Text>
+        <TextInput
+          style={styles.input}
+          value={examId}
+          onChangeText={setExamId}
+          placeholder="e.g. 1"
+          placeholderTextColor="#aaa"
+          keyboardType="numeric"
           editable={!active}
         />
 
         <Text style={styles.label}>Session ID</Text>
         <TextInput
           style={styles.input}
-          value={payload.sessionId}
-          onChangeText={updateField('sessionId')}
-          placeholder="e.g. S2026-001"
-          placeholderTextColor="#aaa"
-          editable={!active}
-        />
-
-        <Text style={styles.label}>Student ID (NMec)</Text>
-        <TextInput
-          style={styles.input}
-          value={payload.nmec}
-          onChangeText={updateField('nmec')}
-          placeholder="e.g. 12345"
+          value={sessionId}
+          onChangeText={setSessionId}
+          placeholder="e.g. 1"
           placeholderTextColor="#aaa"
           keyboardType="numeric"
           editable={!active}
         />
 
-        <Text style={styles.label}>Timestamp</Text>
+        <Text style={styles.label}>Device ID</Text>
         <TextInput
           style={styles.input}
-          value={payload.timestamp}
-          onChangeText={updateField('timestamp')}
-          placeholder="e.g. 2026-04-06T14:20:00.000Z"
-          placeholderTextColor="#aaa"
-          editable={!active}
-        />
-
-        <Text style={styles.label}>Token TTL (Seconds)</Text>
-        <TextInput
-          style={styles.input}
-          value={payload.ttlSec}
-          onChangeText={updateField('ttlSec')}
-          placeholder="e.g. 60"
+          value={deviceId}
+          onChangeText={setDeviceId}
+          placeholder="e.g. 1"
           placeholderTextColor="#aaa"
           keyboardType="numeric"
           editable={!active}
         />
 
-        {!active ? (
-          <TouchableOpacity style={styles.secondaryBtn} onPress={setNowTimestamp}>
-            <Text style={styles.secondaryBtnText}>Use Current Time</Text>
-          </TouchableOpacity>
-        ) : null}
+        <Text style={styles.label}>Student NMEC</Text>
+        <Text style={styles.infoText}>
+          Check the student's card first: only this student will be able to join the session on
+          this device.
+        </Text>
+        <TextInput
+          style={styles.input}
+          value={studentNmec}
+          onChangeText={setStudentNmec}
+          placeholder="e.g. 98765"
+          placeholderTextColor="#aaa"
+          keyboardType="numeric"
+          editable={!active}
+        />
       </View>
 
       <View style={[styles.statusBox, active ? styles.statusOn : styles.statusOff]}>
@@ -220,8 +490,14 @@ function AppContent(): React.JSX.Element {
           <Text style={styles.deactivateBtnText}>Deactivate Secure Provisioning</Text>
         </TouchableOpacity>
       ) : (
-        <TouchableOpacity style={styles.activateBtn} onPress={activate}>
-          <Text style={styles.activateBtnText}>Activate Secure Provisioning</Text>
+        <TouchableOpacity
+          style={[styles.activateBtn, busy && styles.btnDisabled]}
+          onPress={registerAndActivate}
+          disabled={busy}
+        >
+          <Text style={styles.activateBtnText}>
+            {busy ? 'Registering...' : 'Generate Secret & Activate'}
+          </Text>
         </TouchableOpacity>
       )}
     </ScrollView>
@@ -309,6 +585,9 @@ const styles = StyleSheet.create({
     color: BRAND_CHARCOAL,
     fontWeight: '600',
     fontSize: 13,
+  },
+  btnDisabled: {
+    opacity: 0.5,
   },
   statusBox: {
     width: '100%',

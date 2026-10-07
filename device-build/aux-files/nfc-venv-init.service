@@ -1,5 +1,5 @@
 [Unit]
-Description=Initialize NFC reader Python virtualenv (first boot only)
+Description=Initialize NFC reader native deps (liblgpio) + Python virtualenv (first boot only)
 After=network-online.target
 Wants=network-online.target
 

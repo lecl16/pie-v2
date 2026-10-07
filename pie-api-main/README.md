@@ -118,7 +118,7 @@ Interactive, always-up-to-date documentation is available at `/docs` (Swagger UI
 | `/course` | `course.py` | CRUD for courses |
 | `/course/{course_id}` | `exam.py` | CRUD for exams within a course |
 | `/course/{course_id}/{exam_id}` | `session.py` | Exam sessions: create/start/end, exam file upload/download, encryption key, submissions |
-| `/session-users` | `session_user.py` | Links a student + device to a session; tracks join/leave times |
+| `/session-users` | `session_user.py` | Links a student + device to a session (tap-gated: only the examiner-assigned student on the tapped device, see `docs/tap-gated-student-join.md`); tracks join/leave times |
 | `/submission` | `submission.py` | Student submission uploads and per-student session timing |
 | `/device` | `device.py` | CRUD for registered exam devices |
 | `/logs` | `logs.py` | Ingest and query activity logs per device/session/user/course/exam, live SSE log streaming |

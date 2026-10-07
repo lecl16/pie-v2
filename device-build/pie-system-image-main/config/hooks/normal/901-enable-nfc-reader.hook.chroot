@@ -1,5 +1,0 @@
-#!/bin/bash
-set -e
-
-systemctl enable nfc-venv-init.service
-systemctl enable nfc-reader.service

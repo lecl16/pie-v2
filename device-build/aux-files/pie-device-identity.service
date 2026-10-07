@@ -1,0 +1,19 @@
+[Unit]
+Description=PIE device-identity HTTP endpoint for the USB-attached exam host
+After=network.target
+
+[Service]
+Type=simple
+# Pure stdlib (see NFC-Support/device_identity_server.py) — no venv
+# dependency, so this can start independently of nfc-venv-init.service and
+# keep answering even while the reader stack is (re)initializing.
+# print() output is block-buffered when stdout is not a TTY, so without
+# this nothing reaches journalctl until the buffer fills.
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/nfc-reader/device_identity_server.py
+WorkingDirectory=/opt/nfc-reader
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

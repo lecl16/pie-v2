@@ -1,80 +1,75 @@
 # ExaminerApp
 
-React Native (Android-only) app the examiner uses to provision an exam
-device over NFC. The phone emulates an NFC card via Host Card Emulation
-(HCE) and the device runs a reader (`../reader_script.py`) with a PN532
-module. This is **not** a plain data dump — it's a challenge-response
-scheme that proves the tap came from whoever holds a shared secret, binds
-the response to that specific tap, and rejects replays. See
-`../memo.md` for the design history behind this scheme.
+React Native (Android-only) app the examiner uses to provision exam devices
+over NFC. The phone emulates an NFC card via Host Card Emulation (HCE); the
+device side is a Raspberry Pi running `../reader_script.py` against a PN532
+module over I2C.
+
+The app is the **trusted node** of the provisioning scheme: it logs in to
+`pie-api-main` as a teacher, creates the secrets and identities, gives them
+to the server over the API, and to the device in the NFC tap. It does two
+jobs:
+
+- **Claim a new device** — gives an unclaimed Pi its `deviceId`, device API
+  key and the server's `apiBaseUrl`. Once per device. See
+  `../../pie-api-main/docs/device-identity-nfc-bootstrap.md`.
+- **Provision a session** — gives a claimed Pi a session-scoped secret (plus
+  session id, student NMec and the current `apiBaseUrl`), which the Pi then
+  confirms with the server before accepting. See
+  `../../pie-api-main/docs/examiner-trusted-node-provisioning.md`.
+
+No server address is baked into the app or the exam image: the examiner
+types it into the app, and the taps carry it to the Pi. See `../memo.md` for
+the design history.
 
 ## Protocol
 
 AID: `F045584D41505031`
 
-Supported APDU commands (`ExamHceService.kt` on the phone,
-`reader_script.py` on the device):
+APDU commands (`ExamHceService.kt` on the phone, `reader_script.py` on the
+device):
 
-- `SELECT AID` (INS `A4`)
-- `SET_READER_CHALLENGE` (INS `CB`) — device sends a random 16-byte
-  challenge
-- `GET_PROVISION_TOKEN` (INS `CC`) — phone returns a signed token
+| INS | Command | Purpose |
+|---|---|---|
+| `A4` | `SELECT AID` | Select this app's HCE service |
+| `CB` | `SET_READER_CHALLENGE` | Reader sends a fresh per-tap P-256 public key (65 bytes, uncompressed) |
+| `CC` | `GET_PROVISION_TOKEN` | Phone returns the encrypted session payload |
+| `CD` | `GET_DEVICE_IDENTITY` | Phone returns the encrypted device identity (claim tap) |
+| `C0` | `GET RESPONSE` | Fetches the rest of a response longer than 240 bytes (ISO 7816-4 `61xx` chaining) |
 
-Tap flow:
+Both `CC` and `CD` answer with an ECDH P-256 + HKDF-SHA256 + AES-256-GCM
+envelope encrypted to the reader's per-tap key (`NfcCrypto.kt` /
+`decrypt_envelope()`; layout in section 3 of
+`examiner-trusted-node-provisioning.md`). The INS byte is the AAD, so a
+claim envelope can't be replayed as a session envelope or vice versa.
 
-1. Device (`reader_script.py`) sends `SELECT AID`, then
-   `SET_READER_CHALLENGE` with a fresh random challenge.
-2. Phone (`ExamHceService.kt`) builds a token —
-   `{v, jti, exp, ch, sid, nm, ts}` (schema version, single-use token id,
-   expiry, echoed challenge, session id, nmec, timestamp) — and returns it
-   HMAC-SHA256-signed over its own JSON via `GET_PROVISION_TOKEN`:
-   `{ "t": <token>, "m": "<base64url MAC>" }`. The signing key is the
-   shared secret; it and the signing itself never leave native code.
-3. Device verifies the MAC, schema version, that the echoed challenge
-   matches, that the token hasn't expired, and that its `jti` hasn't been
-   used before (`used_token_ids.json`, survives restarts) — rejecting
-   replays.
+Payloads:
 
-The device only accepts a tap during an explicitly armed window (hard
-lock mode) — see "Arm the reader" below.
+- **Claim** (`CD`): `{deviceId, apiKey, apiBaseUrl}`. Single-use on the
+  phone — cleared as soon as it's served, whether or not the reader accepts
+  it.
+- **Session** (`CC`): `{v: 2, sid, nm, k, u, exp}` — session id, NMec, the
+  base64url session secret, `apiBaseUrl`, and an expiry 60 s after the tap.
 
-## Shared secret
-
-There's no server-mediated exchange yet: `reader_script.py` generates a
-random secret on first run, persists it to `provision_secret.txt`, and
-prints it to the terminal for the examiner to copy into the app's
-**Shared Secret** field by hand. A design for replacing this with an
-authenticated fetch through `pie-api-main` (so the secret never needs
-manual transcription, and is scoped to one session instead of the
-device's whole lifetime) exists at
-`../../pie-api-main/docs/device-provisioning-secret-registration.md`
-(design only, not implemented).
+After a session tap the Pi calls
+`POST /device/{deviceId}/provisioning-secret/{sessionId}/confirm` with an
+HMAC proof of the secret and checks the server's HMAC answer — this is what
+proves the tap came from a phone the server trusts and that `apiBaseUrl`
+really is that server. Replay protection comes from the per-tap reader key
+and the single-use server confirmation.
 
 ## Requirements
 
-- Android phone with NFC and HCE support
-- USB debugging enabled
-- PN532 module connected to the exam device (Raspberry Pi or another
-  reader host)
-- Python 3 + `nfcpy` on the reader host
+- Android phone with NFC and HCE support (not an emulator; not iOS)
+- USB debugging enabled, for installing the app
+- A running `pie-api-main` reachable from the phone, and a teacher/admin
+  account on it
+- A Pi set up per `../../device-build/README.md` (PN532 over I2C,
+  `nfc-reader.service` running `reader_script.py`)
 
-## Arm the reader
-
-The device only accepts a tap during an explicitly armed window — run
-this on the device before tapping:
-
-```bash
-python3 reader_script.py --arm --window-seconds 60   # default 60, max 300
-python3 reader_script.py --status                    # check remaining time
-python3 reader_script.py --clear-window               # lock immediately
-```
-
-Then start the reader loop (this also prints the shared secret if it
-doesn't exist yet):
-
-```bash
-python3 reader_script.py
-```
+Plain `http://` API URLs are allowed
+(`res/xml/network_security_config.xml`), since a self-hosted API on a
+room's LAN usually has no TLS certificate.
 
 ## Run the app
 
@@ -121,23 +116,56 @@ adb reverse tcp:8081 tcp:8081
 
 ## Use the app
 
-1. Arm the reader on the device (see above).
-2. Open ExaminerApp.
-3. Paste the **Shared Secret** printed by `reader_script.py`.
-4. Fill in **Session ID**, **Student ID (NMec)**, and **Timestamp**
-   (optional: tap **Use Current Time**), and **Token TTL** (seconds,
-   10-600).
-5. Tap **Activate** to enable secure provisioning.
-6. Tap the phone to the PN532 reader — it will send
-   `SET_READER_CHALLENGE` then `GET_PROVISION_TOKEN`.
-7. Tap **Deactivate** when done. The reader consumes the provisioning
-   window on a successful tap, so a new `--arm` is needed for the next
-   device.
+### Log in
+
+1. Enter the **PIE API Server URL** (e.g. `http://192.168.1.50:8000`) — the
+   address the Pi will also use, so it must be reachable from the exam
+   room's network, not just from the phone.
+2. Enter a teacher/admin **Email** and **Password** and log in.
+
+### Claim a new device (once per Pi)
+
+A freshly set-up Pi has no `/etc/pie/device.json`, so its reader runs a
+claim listener; no `--arm` is needed for this tap.
+
+1. Under **Provision New Device**, enter a **Device Name** (e.g.
+   `Sala 101 - PC03`) and tap **Create & Hold for Tap**. This calls
+   `POST /device/create` and holds the returned identity on the phone.
+2. Tap the phone against the Pi's reader. The Pi writes
+   `/etc/pie/device.json` and restarts into the normal session reader loop.
+3. **Cancel** discards a held identity that hasn't been tapped yet.
+
+### Provision a session
+
+1. On the Pi, open the hard-lock window (session taps are rejected
+   otherwise):
+
+   ```bash
+   sudo /opt/nfc-reader/venv/bin/python /opt/nfc-reader/reader_script.py --arm   # default 60 s, max 300 (--window-seconds)
+   ```
+
+   `--status` shows the remaining time, `--clear-window` locks immediately.
+2. Check the student's card. In the app, fill **Course ID**, **Exam ID**,
+   **Session ID**, **Device ID** and **Student NMEC**, then tap **Generate
+   Secret & Activate**. The app generates a secret in native code and
+   registers it, with the NMEC, via
+   `POST /course/{c}/{e}/{s}/device/{d}/provisioning-secret` (valid 5
+   minutes). Only that student can then join the session on this device
+   (`../../pie-api-main/docs/tap-gated-student-join.md`); to fix a wrong
+   NMEC, register and tap again before the student joins.
+3. Tap the phone against the Pi's reader. The Pi decrypts the payload,
+   confirms it with the server, saves it to `/etc/pie/session.json` and
+   updates `apiBaseUrl` in `/etc/pie/device.json`. A successful tap consumes
+   the window, so the next device needs a new `--arm`.
+4. Tap **Deactivate Secure Provisioning** when done. This also deletes the
+   registered secret on the server (best effort) if it wasn't used.
 
 ## Android NFC files
 
 - `android/app/src/main/AndroidManifest.xml`
 - `android/app/src/main/res/xml/apduservice.xml`
-- `android/app/src/main/java/com/examinerapp/ExamHceService.kt`
-- `android/app/src/main/java/com/examinerapp/NfcHceModule.kt`
+- `android/app/src/main/res/xml/network_security_config.xml`
+- `android/app/src/main/java/com/examinerapp/ExamHceService.kt` — APDU handling
+- `android/app/src/main/java/com/examinerapp/NfcCrypto.kt` — envelope encryption
+- `android/app/src/main/java/com/examinerapp/NfcHceModule.kt` — React Native bridge
 - `android/app/src/main/java/com/examinerapp/NfcHcePackage.kt`

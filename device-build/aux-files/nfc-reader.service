@@ -7,6 +7,9 @@ Requires=nfc-venv-init.service
 Type=simple
 # Runs as root: needs raw /dev/i2c-1 access for the PN532, and this is a
 # narrowly-scoped local hardware helper, not a network-facing service.
+# print() output is block-buffered when stdout is not a TTY, so without
+# this nothing reaches journalctl until the buffer fills.
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/nfc-reader/venv/bin/python /opt/nfc-reader/reader_script.py
 WorkingDirectory=/opt/nfc-reader
 Restart=always
