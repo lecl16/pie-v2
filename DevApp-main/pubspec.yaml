@@ -23,6 +23,7 @@ dependencies:
   duration: ^4.0.3
   process_run: ^1.2.4
   url_launcher: ^6.3.1
+  crypto: ^3.0.6
 
 dev_dependencies:
   flutter_test:

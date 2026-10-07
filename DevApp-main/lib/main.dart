@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
+
+import 'package:crypto/crypto.dart';
 
 import 'package:window_manager/window_manager.dart';
 import 'package:flutter/material.dart';
@@ -66,6 +69,9 @@ class _ExamHomePageState extends State<ExamHomePage> {
   late final Timer _connectionTimer;
   bool _appInitialized = false;
   bool _connectedToServer = false;
+  bool _deviceProvisioned = false;
+  bool _sessionProvisioned = false;
+  bool _wrongStudent = false;
   bool _showIdField = false;
   bool _invalidLogin = false;
   String email = '';
@@ -110,11 +116,28 @@ class _ExamHomePageState extends State<ExamHomePage> {
 
     setState(() {
       _appInitialized = true;
+      _deviceProvisioned = Config.isProvisioned;
+      _sessionProvisioned = Config.isSessionProvisioned;
     });
 
-    _connectionTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+    _connectionTimer = Timer.periodic(Duration(seconds: 1), (timer) async {
+      // Every second while waiting for the NFC claim, then every 10s to
+      // pick up a server address changed by a later session tap (see
+      // Config.fetchDeviceIdentity) — one timer instead of a second one
+      // just for the Pi poll.
+      if (!_deviceProvisioned || timer.tick % 10 == 0) {
+        await Config.fetchDeviceIdentity();
+      }
+      // Same cadence for the examiner's session tap: every second while
+      // waiting for it, then every 10s to pick up a re-registration (e.g.
+      // the examiner fixing a wrong NMEC).
+      if (!_sessionProvisioned || timer.tick % 10 == 0) {
+        await Config.fetchProvisionedSession();
+      }
       setState(() {
         _connectedToServer = _subscriber.connectedToServer;
+        _deviceProvisioned = Config.isProvisioned;
+        _sessionProvisioned = Config.isSessionProvisioned;
       });
     });
   }
@@ -146,6 +169,18 @@ class _ExamHomePageState extends State<ExamHomePage> {
       if (response.statusCode == 200) {
         var data = jsonDecode(response.body);
         var token = data['access_token'];
+        // Only for the student's benefit — the server rejects a join by
+        // anyone other than the student the examiner assigned to this
+        // device anyway (pie-api-main/docs/tap-gated-student-join.md).
+        // Checked before anything is stored, so the right student can
+        // still log in once the examiner fixes the assignment.
+        if (data['nmec'].toString() != Config.provisionedNmec) {
+          setState(() {
+            _wrongStudent = true;
+            _invalidLogin = false;
+          });
+          return;
+        }
         nmec = data['nmec'];
         Config.addToConfigMap('token', token);
         Config.addToConfigMap('nmec', nmec);
@@ -153,6 +188,7 @@ class _ExamHomePageState extends State<ExamHomePage> {
         setState(() {
           _showIdField = true;
           _invalidLogin = false;
+          _wrongStudent = false;
         });
       } else {
         print('Erro no login: ${response.statusCode} - ${response.body}');
@@ -170,22 +206,26 @@ class _ExamHomePageState extends State<ExamHomePage> {
   Future<void> _sendId() async {
     String code = _codeController.text;
 
-    if (code.isEmpty) {
+    if (code.isEmpty || !Config.isSessionProvisioned) {
       return;
     }
 
     // try {
+      final nonce = _b64uEncode(List<int>.generate(16, (_) => Random.secure().nextInt(256)));
       var response = await http.post(
         Uri.parse('${Config.apiBaseUrl}/session-users/create'),
         headers: {
           "Content-Type": "application/json",
           "Authorization": "Bearer ${Config.getFromConfigMap('token')}"
         },
+        // No user_nmec/user_email: the server takes the student from the
+        // JWT. nonce/mac prove this join comes from the device the examiner
+        // tapped for this student.
         body: jsonEncode({
-          "user_nmec": nmec,
-          "user_email": email,
           "join_code": code,
-          "device_id": Config.deviceId
+          "device_id": Config.deviceId,
+          "nonce": nonce,
+          "mac": _joinMac(nonce),
         }),
       );
 
@@ -256,6 +296,17 @@ class _ExamHomePageState extends State<ExamHomePage> {
     //   _subscriber.issueNotification('Erro ao estabelecer ligação ao servidor. Tente novamente.');
     //   print('Erro ao enviar ID: $e');
     // }
+  }
+
+  static String _b64uEncode(List<int> bytes) =>
+      base64Url.encode(bytes).replaceAll('=', '');
+
+  /// Must match join_mac() in pie-api-main/app/api/routes/device.py.
+  String _joinMac(String nonce) {
+    final key = base64Url.decode(base64Url.normalize(Config.joinKey!));
+    final message =
+        'pie-join-v1|${Config.deviceId}|${Config.provisionedSessionId}|$nmec|$nonce';
+    return _b64uEncode(Hmac(sha256, key).convert(utf8.encode(message)).bytes);
   }
 
   void _showNotifications() {
@@ -426,6 +477,27 @@ class _ExamHomePageState extends State<ExamHomePage> {
     return false;
   }
 
+  /// Shared by the "not yet provisioned" and "connecting to server" waiting
+  /// screens below — both are dead ends a student can't do anything from,
+  /// so both offer the same way out.
+  Widget _buildPoweroffButton() {
+    return ElevatedButton(
+      onPressed: () async {
+        final result = await Process.run('/sbin/poweroff', [], runInShell: true);
+
+        if (result.exitCode == 0) {
+          print('Sistema encerrado com sucesso.');
+        } else {
+          _subscriber.issueNotification('Erro ao encerrar o sistema.');
+        }
+      },
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.red[700],
+        foregroundColor: Colors.white,
+      ),
+      child: Text('Cancelar e Fechar'),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -504,110 +576,145 @@ class _ExamHomePageState extends State<ExamHomePage> {
                   ),
                 ),
                 SizedBox(height: 20),
-                Text(
-                  'Estado da conexão: ${_connectedToServer ? 'Conectado' : 'Desconectado'}',
-                  style: TextStyle(
-                      fontSize: 14,
-                      color: _connectedToServer ? Colors.green : Colors.red
-                  ),
-                ),
-                SizedBox(height: 20),
-                if (!_appInitialized) ...[
+                // Gated ahead of everything else below: an unclaimed device
+                // (see pie-api-main/docs/device-identity-nfc-bootstrap.md)
+                // has no deviceId yet, so session join would fail even if
+                // the server connection came up — there's nothing useful
+                // for a student to do here until the examiner's NFC tap
+                // lands. Mirrors the existing !_connectedToServer waiting
+                // state below, one tier higher.
+                if (!_deviceProvisioned) ...[
                   CircularProgressIndicator(),
                   SizedBox(height: 20),
-                  Text('A inicializar aplicação...'),
-                ],
-                if (_appInitialized && !_connectedToServer) ...[
+                  Text(
+                    'Dispositivo não provisionado',
+                    style: TextStyle(fontSize: 14, color: Colors.red),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Aproxime o telemóvel do examinador deste dispositivo para o ativar.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  SizedBox(height: 20),
+                  _buildPoweroffButton(),
+                ] else if (!_sessionProvisioned) ...[
+                  // The examiner taps the device after checking the
+                  // student's card, before the student logs in
+                  // (pie-api-main/docs/tap-gated-student-join.md).
                   CircularProgressIndicator(),
                   SizedBox(height: 20),
-                  Text('A conectar ao servidor...'),
+                  Text(
+                    'A aguardar o examinador',
+                    style: TextStyle(fontSize: 14, color: Colors.red),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'O examinador tem de verificar o seu cartão de estudante e aproximar o telemóvel deste dispositivo.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12),
+                  ),
                   SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: () async {
-                      final result = await Process.run('/sbin/poweroff', [], runInShell: true);
-
-                      if (result.exitCode == 0) {
-                        print('Sistema encerrado com sucesso.');
-                      } else {
-                        _subscriber.issueNotification('Erro ao encerrar o sistema.');
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red[700],
-                      foregroundColor: Colors.white,
-                    ),
-                    child: Text('Cancelar e Fechar'),
-                  ),
-                ],
-                if (_connectedToServer) ...[
-                  SizedBox(
-                    width: 250,
-                    height: 50,
-                    child: TextFormField(
-                      controller: _usernameController,
-                      decoration: InputDecoration(
-                        labelText: 'E-mail',
-                        prefixIcon: Icon(Icons.person),
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: 10,),
-                  SizedBox(
-                    width: 250,
-                    height: 50,
-                    child: TextFormField(
-                      controller: _passwordController,
-                      obscureText: !_passwordVisible,
-                      decoration: InputDecoration(
-                        border: OutlineInputBorder(),
-                        labelText: 'Password',
-                        prefixIcon: Icon(Icons.lock),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _passwordVisible ? Icons.visibility : Icons.visibility_off,
-                          ),
-                          onPressed: () {
-                            setState(() {
-                              _passwordVisible = !_passwordVisible;
-                            });
-                          },
-                        ),
-                      ),
+                  _buildPoweroffButton(),
+                ] else ...[
+                  Text(
+                    'Estado da conexão: ${_connectedToServer ? 'Conectado' : 'Desconectado'}',
+                    style: TextStyle(
+                        fontSize: 14,
+                        color: _connectedToServer ? Colors.green : Colors.red
                     ),
                   ),
                   SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: _login,
-                    child: Text('Autenticar'),
-                  ),
-                  if (_invalidLogin && !_showIdField) ...[
+                  if (!_appInitialized) ...[
+                    CircularProgressIndicator(),
                     SizedBox(height: 20),
-                    Text('Credenciais inválidas', style: TextStyle(color: Colors.red)),
+                    Text('A inicializar aplicação...'),
                   ],
-                  if (_showIdField) ...[
+                  if (_appInitialized && !_connectedToServer) ...[
+                    CircularProgressIndicator(),
                     SizedBox(height: 20),
+                    Text('A conectar ao servidor...'),
+                    SizedBox(height: 20),
+                    _buildPoweroffButton(),
+                  ],
+                  if (_connectedToServer) ...[
                     SizedBox(
                       width: 250,
                       height: 50,
                       child: TextFormField(
-                        controller: _codeController,
+                        controller: _usernameController,
                         decoration: InputDecoration(
-                          labelText: 'Código da Sessão',
-                          prefixIcon: Icon(Icons.perm_identity),
+                          labelText: 'E-mail',
+                          prefixIcon: Icon(Icons.person),
                           border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 10,),
+                    SizedBox(
+                      width: 250,
+                      height: 50,
+                      child: TextFormField(
+                        controller: _passwordController,
+                        obscureText: !_passwordVisible,
+                        decoration: InputDecoration(
+                          border: OutlineInputBorder(),
+                          labelText: 'Password',
+                          prefixIcon: Icon(Icons.lock),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _passwordVisible ? Icons.visibility : Icons.visibility_off,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _passwordVisible = !_passwordVisible;
+                              });
+                            },
+                          ),
                         ),
                       ),
                     ),
                     SizedBox(height: 20),
                     ElevatedButton(
-                      onPressed: _sendId,
-                      child: Text('Enviar código'),
+                      onPressed: _login,
+                      child: Text('Autenticar'),
                     ),
-                  ],
-                  if (_invalidLogin && _showIdField) ...[
-                    SizedBox(height: 20),
-                    Text('Sessão inválida', style: TextStyle(color: Colors.red)),
+                    if (_wrongStudent) ...[
+                      SizedBox(height: 20),
+                      Text(
+                        'Este dispositivo foi atribuído a outro estudante. Chame o examinador.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.red),
+                      ),
+                    ],
+                    if (_invalidLogin && !_showIdField) ...[
+                      SizedBox(height: 20),
+                      Text('Credenciais inválidas', style: TextStyle(color: Colors.red)),
+                    ],
+                    if (_showIdField) ...[
+                      SizedBox(height: 20),
+                      SizedBox(
+                        width: 250,
+                        height: 50,
+                        child: TextFormField(
+                          controller: _codeController,
+                          decoration: InputDecoration(
+                            labelText: 'Código da Sessão',
+                            prefixIcon: Icon(Icons.perm_identity),
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 20),
+                      ElevatedButton(
+                        onPressed: _sendId,
+                        child: Text('Enviar código'),
+                      ),
+                    ],
+                    if (_invalidLogin && _showIdField) ...[
+                      SizedBox(height: 20),
+                      Text('Sessão inválida', style: TextStyle(color: Colors.red)),
+                    ],
                   ],
                 ],
               ],

@@ -44,6 +44,13 @@ function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_options(${TARGET} PRIVATE -Wall -Werror)
   target_compile_options(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:-O3>")
   target_compile_definitions(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>")
+  # The exam image is Debian bookworm (GLib 2.74). Building against newer
+  # GLib headers (e.g. Ubuntu 24.04's 2.80) otherwise makes G_DEFINE_TYPE
+  # emit g_once_init_enter_pointer, which bookworm lacks, and the app fails
+  # to start with "undefined symbol". Plugins use this function too.
+  target_compile_definitions(${TARGET} PRIVATE
+    GLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_74
+    GLIB_VERSION_MAX_ALLOWED=GLIB_VERSION_2_74)
 endfunction()
 
 # Flutter library and tool build rules.
