@@ -47,8 +47,16 @@ npm install
 Configure the API endpoint in `webapp/.env`:
 
 ```bash
-NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_API_URL=https://localhost:8000
 ```
+
+The API serves HTTPS only, with a certificate signed by its deployment's own CA
+(`pie-api-main/certs/ca.crt`, see `pie-api-main/README.md`). Two things must trust it:
+
+- **Node** (server-side requests): start Next.js with
+  `NODE_EXTRA_CA_CERTS=../../pie-api-main/certs/ca.crt npm run dev` (or `npm run start`).
+- **The browser** (client-side requests): import `ca.crt` as a trusted certificate
+  authority in the browser's or the system's certificate settings.
 
 ### Run in development
 

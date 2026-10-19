@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from pydantic import BaseModel
@@ -9,10 +9,12 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.db.device import Device
+from app.models.db.examiner_phone import ExaminerPhone
 from app.models.db.user import User
 from app.schemas.user import UserOut
 from app.core.config import config
 from app.core.security import hash_device_key
+from app.core.phone_certs import normalize_fingerprint
 
 # Change these settings in production
 SECRET_KEY = config.SECRET_KEY
@@ -88,3 +90,42 @@ def get_device(x_device_key: str = Header(..., alias="X-Device-Key"), db: Sessio
     if device is None:
         raise credentials_exception
     return device
+
+# Set by Caddy on the phone port only, from the client certificate it has
+# just verified against the phone CA; dropped on the public port (Caddyfile).
+PHONE_CERT_HEADER = "X-Pie-Phone-Cert-Fingerprint"
+
+def get_examiner_phone(
+    request: Request,
+    current_user: User = Depends(get_teacher_or_admin_user),
+    db: Session = Depends(get_db),
+) -> ExaminerPhone:
+    """For the actions only the trusted node may take (creating devices,
+    registering provisioning secrets): the request must come from an
+    enrolled, unrevoked Examiner App phone that belongs to the logged-in
+    teacher — see docs/examiner-phone-enrollment.md. Needs both the JWT and
+    the phone's certificate, so neither a stolen password nor a stolen
+    phone is enough on its own."""
+    fingerprint = request.headers.get(PHONE_CERT_HEADER, "")
+    if not fingerprint:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This action requires an enrolled Examiner App phone (phone port)",
+        )
+    phone = db.query(ExaminerPhone).filter(
+        ExaminerPhone.cert_fingerprint == normalize_fingerprint(fingerprint)
+    ).first()
+    if phone is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Phone not enrolled")
+    if phone.revoked_at is not None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Phone certificate revoked")
+    if phone.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Phone certificate expired")
+    if phone.user_nmec != current_user.nmec:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Phone enrolled by another user",
+        )
+    phone.last_seen = datetime.utcnow()
+    db.commit()
+    return phone

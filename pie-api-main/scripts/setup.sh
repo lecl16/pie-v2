@@ -3,24 +3,33 @@
 #
 # Generates a `.env` file with unique, randomly-generated secrets so a
 # professor/examiner standing up their own instance never has to pick or
-# type a password/JWT secret themselves. Safe to re-run: if `.env` already
-# exists it is left untouched.
+# type a password/JWT secret themselves, and the TLS certificates (see
+# generate-certs.sh). Safe to re-run: an existing `.env` or certificate is
+# left untouched.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$ROOT_DIR/.env"
 
-if [[ -f "$ENV_FILE" ]]; then
-  echo "A .env file already exists at $ENV_FILE — leaving it untouched."
-  echo "Delete it first if you want this script to generate a fresh one."
-  exit 0
-fi
-
 if ! command -v openssl >/dev/null 2>&1; then
   echo "Error: openssl is required to generate secrets but was not found." >&2
   echo "Install it (e.g. 'apt install openssl' or 'brew install openssl') and re-run this script." >&2
   exit 1
+fi
+
+if [[ -f "$ROOT_DIR/certs/server.crt" && -f "$ROOT_DIR/certs/phone-ca.key" ]]; then
+  echo "TLS certificates already exist in $ROOT_DIR/certs — leaving them untouched."
+  echo "Run scripts/generate-certs.sh to re-issue the server certificate."
+else
+  "$SCRIPT_DIR/generate-certs.sh"
+fi
+echo
+
+if [[ -f "$ENV_FILE" ]]; then
+  echo "A .env file already exists at $ENV_FILE — leaving it untouched."
+  echo "Delete it first if you want this script to generate a fresh one."
+  exit 0
 fi
 
 echo "Generating secrets for a new PIE-API deployment..."

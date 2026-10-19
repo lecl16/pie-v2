@@ -15,6 +15,9 @@ class DeviceProvisioningSecret(Base):
     nmec = Column(Integer, nullable=True)
     expires_at = Column(DateTime, nullable=False)
     claimed_at = Column(DateTime, nullable=True)
+    # Audit: the enrolled Examiner App phone that registered this secret
+    # (docs/examiner-phone-enrollment.md).
+    registered_by_phone_id = Column(Integer, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("device_id", "session_id", name="uix_device_provisioning_secret"),

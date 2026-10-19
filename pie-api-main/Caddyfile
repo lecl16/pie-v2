@@ -1,0 +1,43 @@
+# TLS termination for the PIE API (see README.md, "HTTPS"). Uvicorn itself
+# speaks plain HTTP and is only reachable inside the compose network.
+{
+	# Certificates come from scripts/generate-certs.sh, not from an ACME CA.
+	auto_https off
+	# Clients that reach the server by IP send no SNI.
+	default_sni pie-api
+	# With client auth, Caddy by default rejects a request whose Host differs
+	# from the TLS server name (421), which is every request made by IP, as
+	# the Examiner App does. The check stops a client from reaching another
+	# site with a weaker client-auth policy over the same connection; the
+	# phone port serves a single site, so there is none to reach.
+	servers :8443 {
+		strict_sni_host insecure_off
+	}
+}
+
+(api) {
+	reverse_proxy app:8000
+}
+
+# Everyone: the dashboard, the Examiner App's login and enrollment, and the
+# exam devices. No client certificate, so the phone header is always dropped:
+# a client cannot claim to be an enrolled phone here.
+:8000 {
+	tls /certs/server.crt /certs/server.key
+	request_header -X-Pie-Phone-Cert-Fingerprint
+	import api
+}
+
+# Enrolled Examiner App phones only (docs/examiner-phone-enrollment.md): the
+# handshake fails without a client certificate signed by the phone CA, and
+# the API gets the certificate's fingerprint to look up which phone it is.
+:8443 {
+	tls /certs/server.crt /certs/server.key {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /certs/phone-ca.crt
+		}
+	}
+	request_header X-Pie-Phone-Cert-Fingerprint {http.request.tls.client.fingerprint}
+	import api
+}

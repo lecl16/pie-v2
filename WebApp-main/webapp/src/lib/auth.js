@@ -119,7 +119,7 @@ export async function setupTokenRefresh() {
     // Set timeout to refresh token
     setTimeout(async () => {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://localhost:8000";
         
         // Call your token refresh endpoint
         const response = await fetch(`${apiUrl}/users/refresh_token`, {

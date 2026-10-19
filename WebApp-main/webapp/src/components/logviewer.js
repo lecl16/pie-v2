@@ -57,7 +57,7 @@ const LogViewer = ({ sessionId, user_nmec }) => {
       }
       
       // Include token as query parameter for SSE
-      const url = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/logs/session/${sessionId}/user/${user_nmec}/stream?token=${token}`;
+      const url = `${process.env.NEXT_PUBLIC_API_URL || "https://localhost:8000"}/logs/session/${sessionId}/user/${user_nmec}/stream?token=${token}`;
       eventSourceRef.current = new EventSource(url);
 
       eventSourceRef.current.onmessage = (event) => {

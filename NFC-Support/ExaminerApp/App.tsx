@@ -10,6 +10,11 @@
  *    server URL.
  * 4) Reader sends its per-tap public key (INS CB), then requests the
  *    encrypted payload (INS CC), then confirms the secret with the server.
+ *
+ * After login the app also enrolls the phone (once): it gets a client
+ * certificate for a key kept in the Android Keystore, and sends the
+ * trusted-node calls (device creation, provisioning secrets) to the API's
+ * phone port with it — see pie-api-main/docs/examiner-phone-enrollment.md.
  */
 
 import React, { useCallback, useState } from 'react';
@@ -17,6 +22,7 @@ import {
   Alert,
   Image,
   NativeModules,
+  Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -28,7 +34,7 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const { NfcHceModule } = NativeModules;
+const { NfcHceModule, PhoneCredentialModule } = NativeModules;
 
 // Matches ExamHceService.kt's handleGetProvisionToken(), which reads
 // sessionId/nmec/apiBaseUrl/ttlSec from this JSON and ignores anything else.
@@ -64,6 +70,36 @@ interface DeviceIdentity {
 
 const nfcHceModule = NfcHceModule as NativeHceModule | undefined;
 
+interface PhoneCredentialStatus {
+  enrolled: boolean;
+  fingerprint?: string;
+  subject?: string;
+  expiresAt?: number;
+  mtlsPort?: number;
+}
+
+interface NativePhoneCredentialModule {
+  getStatus: () => Promise<PhoneCredentialStatus>;
+  createCsr: () => Promise<string>;
+  storeCertificate: (certificatePem: string, mtlsPort: number) => Promise<PhoneCredentialStatus>;
+  clear: () => Promise<void>;
+}
+
+const phoneCredentialModule = PhoneCredentialModule as NativePhoneCredentialModule | undefined;
+
+// Re-enroll this long before the phone's certificate expires.
+const RENEW_BEFORE_MS = 30 * 24 * 60 * 60 * 1000;
+
+// The same server, on the port that requires the phone's certificate.
+function withPort(baseUrl: string, port: number): string {
+  return baseUrl.replace(/^(https:\/\/(?:\[[^\]]+\]|[^/:]+))(?::\d+)?/i, `$1:${port}`);
+}
+
+function phoneLabel(): string {
+  const constants = Platform.constants as { Brand?: string; Model?: string };
+  return [constants.Brand, constants.Model].filter(Boolean).join(' ').slice(0, 100);
+}
+
 function App(): React.JSX.Element {
   const isDarkMode = useColorScheme() === 'dark';
   return (
@@ -81,11 +117,17 @@ function AppContent(): React.JSX.Element {
   const [status, setStatus] = useState('Log in, then pick a device to provision.');
   const [busy, setBusy] = useState(false);
 
-  const [apiBaseUrl, setApiBaseUrl] = useState('http://REPLACE-WITH-YOUR-PIE-API-HOST:8000');
+  const [apiBaseUrl, setApiBaseUrl] = useState('https://REPLACE-WITH-YOUR-PIE-API-HOST:8000');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [loggedInAs, setLoggedInAs] = useState<string | null>(null);
+
+  // Base URL of the phone port once this phone's certificate is accepted
+  // there; null until then, and the trusted-node actions stay disabled.
+  const [phoneBaseUrl, setPhoneBaseUrl] = useState<string | null>(null);
+  const [phoneStatus, setPhoneStatus] = useState('');
+  const [phoneBusy, setPhoneBusy] = useState(false);
 
   const [courseId, setCourseId] = useState('');
   const [examId, setExamId] = useState('');
@@ -102,9 +144,90 @@ function AppContent(): React.JSX.Element {
     'Provisioning a new device holds its identity here until the next NFC tap.',
   );
 
+  const baseUrl = useCallback(() => apiBaseUrl.trim().replace(/\/$/, ''), [apiBaseUrl]);
+
+  // Asks the server for a certificate for a fresh Keystore key (teacher JWT,
+  // public port). Replaces any previous credential of this phone.
+  const enrollPhone = useCallback(
+    async (token: string): Promise<PhoneCredentialStatus> => {
+      if (!phoneCredentialModule) {
+        throw new Error('PhoneCredentialModule is unavailable. Rebuild the Android app.');
+      }
+      const csr = await phoneCredentialModule.createCsr();
+      const response = await fetch(`${baseUrl()}/examiner-phone/enroll`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ csr, label: phoneLabel() }),
+      });
+      if (!response.ok) {
+        throw new Error(`Enrollment failed (HTTP ${response.status}): ${await response.text()}`);
+      }
+      const data: { certificate: string; mtls_port: number } = await response.json();
+      return phoneCredentialModule.storeCertificate(data.certificate, data.mtls_port);
+    },
+    [baseUrl],
+  );
+
+  // Checks that the phone port accepts this phone's certificate for this
+  // teacher (enrolled, not revoked) and, if so, enables the trusted-node
+  // actions. Enrolls first if the phone has no certificate, or one about to
+  // expire; a certificate the server rejects is only replaced on request
+  // (Re-enroll), so a revoked phone does not silently re-enroll itself.
+  const setUpPhone = useCallback(
+    async (token: string, forceEnroll: boolean) => {
+      if (!phoneCredentialModule) {
+        setPhoneStatus('Phone credential module missing — rebuild the Android app.');
+        return;
+      }
+      setPhoneBusy(true);
+      setPhoneBaseUrl(null);
+      try {
+        let credential = await phoneCredentialModule.getStatus();
+        if (
+          forceEnroll ||
+          !credential.enrolled ||
+          (credential.expiresAt ?? 0) - Date.now() < RENEW_BEFORE_MS
+        ) {
+          setPhoneStatus('Enrolling this phone...');
+          credential = await enrollPhone(token);
+        }
+        const url = withPort(baseUrl(), credential.mtlsPort ?? 8443);
+        let response: Response;
+        try {
+          response = await fetch(`${url}/examiner-phone/current`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        } catch {
+          throw new Error(
+            'The server refused this phone\'s certificate (enrolled with another server?). ' +
+              'Re-enroll to get a new one.',
+          );
+        }
+        if (!response.ok) {
+          const detail = await response.text();
+          throw new Error(`Phone not accepted (HTTP ${response.status}): ${detail}`);
+        }
+        const phone: { id: number } = await response.json();
+        setPhoneBaseUrl(url);
+        setPhoneStatus(`This phone is enrolled as phone-${phone.id}.`);
+      } catch (err) {
+        setPhoneStatus(err instanceof Error ? err.message : String(err));
+      } finally {
+        setPhoneBusy(false);
+      }
+    },
+    [baseUrl, enrollPhone],
+  );
+
   const login = useCallback(async () => {
     if (!apiBaseUrl.trim() || !email.trim() || !password) {
       Alert.alert('Incomplete', 'Please fill server URL, email and password.');
+      return;
+    }
+    // The URL is also handed to the devices in the taps, so plain HTTP is
+    // refused here rather than only by the network security config.
+    if (!/^https:\/\//i.test(apiBaseUrl.trim())) {
+      Alert.alert('Insecure server URL', 'The server URL must start with https://');
       return;
     }
 
@@ -125,25 +248,36 @@ function AppContent(): React.JSX.Element {
       setAccessToken(data.access_token);
       setLoggedInAs(data.email ?? email.trim());
       setStatus('Logged in. Fill in course/exam/session/device to provision.');
+      await setUpPhone(data.access_token, false);
     } catch (err) {
-      Alert.alert('Login failed', err instanceof Error ? err.message : String(err));
+      // fetch() reports a rejected certificate only as a network error.
+      const message = err instanceof Error ? err.message : String(err);
+      Alert.alert(
+        'Login failed',
+        message === 'Network request failed'
+          ? `${message}. Check the server address, and that this deployment's CA certificate (ca.crt) is installed on the phone.`
+          : message,
+      );
     } finally {
       setBusy(false);
     }
-  }, [apiBaseUrl, email, password]);
+  }, [apiBaseUrl, email, password, setUpPhone]);
 
   const logout = useCallback(() => {
     setAccessToken(null);
     setLoggedInAs(null);
+    setPhoneBaseUrl(null);
+    setPhoneStatus('');
     setStatus('Logged out.');
   }, []);
 
+  // On the phone port: only an enrolled phone may register secrets.
   const provisioningSecretUrl = useCallback(
     () =>
-      `${apiBaseUrl.trim().replace(/\/$/, '')}/course/${encodeURIComponent(courseId.trim())}` +
+      `${phoneBaseUrl}/course/${encodeURIComponent(courseId.trim())}` +
       `/${encodeURIComponent(examId.trim())}/${encodeURIComponent(sessionId.trim())}` +
       `/device/${encodeURIComponent(deviceId.trim())}/provisioning-secret`,
-    [apiBaseUrl, courseId, examId, sessionId, deviceId],
+    [phoneBaseUrl, courseId, examId, sessionId, deviceId],
   );
 
   const registerAndActivate = useCallback(async () => {
@@ -156,6 +290,10 @@ function AppContent(): React.JSX.Element {
     }
     if (!accessToken) {
       Alert.alert('Not logged in', 'Log in first.');
+      return;
+    }
+    if (!phoneBaseUrl) {
+      Alert.alert('Phone not enrolled', phoneStatus || 'This phone is not enrolled yet.');
       return;
     }
     if (
@@ -220,6 +358,8 @@ function AppContent(): React.JSX.Element {
   }, [
     accessToken,
     apiBaseUrl,
+    phoneBaseUrl,
+    phoneStatus,
     courseId,
     examId,
     sessionId,
@@ -235,13 +375,13 @@ function AppContent(): React.JSX.Element {
 
     // Best-effort: drop the registered secret so it can no longer be
     // confirmed. If the tap already went through it's single-use anyway.
-    if (accessToken) {
+    if (accessToken && phoneBaseUrl) {
       fetch(provisioningSecretUrl(), {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${accessToken}` },
       }).catch(() => {});
     }
-  }, [accessToken, provisioningSecretUrl]);
+  }, [accessToken, phoneBaseUrl, provisioningSecretUrl]);
 
   const createAndHoldDeviceIdentity = useCallback(async () => {
     if (!nfcHceModule?.setPendingDeviceIdentity) {
@@ -255,6 +395,10 @@ function AppContent(): React.JSX.Element {
       Alert.alert('Not logged in', 'Log in first.');
       return;
     }
+    if (!phoneBaseUrl) {
+      Alert.alert('Phone not enrolled', phoneStatus || 'This phone is not enrolled yet.');
+      return;
+    }
     if (!newDeviceName.trim()) {
       Alert.alert('Incomplete', 'Please name the new device.');
       return;
@@ -262,8 +406,9 @@ function AppContent(): React.JSX.Element {
 
     setDeviceBusy(true);
     try {
+      // The device gets the public URL: it never uses the phone port.
       const trimmedBaseUrl = apiBaseUrl.trim().replace(/\/$/, '');
-      const response = await fetch(`${trimmedBaseUrl}/device/create`, {
+      const response = await fetch(`${phoneBaseUrl}/device/create`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -295,7 +440,7 @@ function AppContent(): React.JSX.Element {
     } finally {
       setDeviceBusy(false);
     }
-  }, [accessToken, apiBaseUrl, newDeviceName]);
+  }, [accessToken, apiBaseUrl, phoneBaseUrl, phoneStatus, newDeviceName]);
 
   const cancelPendingIdentity = useCallback(() => {
     nfcHceModule?.clearPendingDeviceIdentity?.();
@@ -316,21 +461,13 @@ function AppContent(): React.JSX.Element {
         />
       </View>
 
-      <View style={styles.infoCard}>
-        <Text style={styles.infoTitle}>Secure APDU Commands</Text>
-        <Text style={styles.infoText}>SELECT AID: INS A4</Text>
-        <Text style={styles.infoText}>SET READER KEY: INS CB</Text>
-        <Text style={styles.infoText}>GET PROVISION TOKEN (encrypted): INS CC</Text>
-        <Text style={styles.infoText}>GET DEVICE IDENTITY (encrypted): INS CD</Text>
-      </View>
-
       <View style={styles.card}>
         <Text style={styles.label}>PIE API Server URL</Text>
         <TextInput
           style={styles.input}
           value={apiBaseUrl}
           onChangeText={setApiBaseUrl}
-          placeholder="http://your-pie-api-host:8000"
+          placeholder="https://your-pie-api-host:8000"
           placeholderTextColor="#aaa"
           autoCapitalize="none"
           autoCorrect={false}
@@ -372,6 +509,17 @@ function AppContent(): React.JSX.Element {
         ) : (
           <>
             <Text style={styles.infoText}>Logged in as {loggedInAs}</Text>
+            <View style={[styles.statusBox, phoneBaseUrl ? styles.statusOn : styles.statusOff]}>
+              <Text style={styles.statusText}>{phoneBusy ? 'Checking this phone...' : phoneStatus}</Text>
+            </View>
+            {!phoneBaseUrl && !phoneBusy ? (
+              <TouchableOpacity
+                style={styles.secondaryBtn}
+                onPress={() => accessToken && setUpPhone(accessToken, true)}
+              >
+                <Text style={styles.secondaryBtnText}>Re-enroll This Phone</Text>
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity style={styles.secondaryBtn} onPress={logout}>
               <Text style={styles.secondaryBtnText}>Log Out</Text>
             </TouchableOpacity>
@@ -393,7 +541,7 @@ function AppContent(): React.JSX.Element {
             style={styles.input}
             value={newDeviceName}
             onChangeText={setNewDeviceName}
-            placeholder="e.g. Sala 101 - PC03"
+            placeholder="e.g. Sala 4.01.02 - PC03"
             placeholderTextColor="#aaa"
             editable={!pendingIdentity}
           />
@@ -426,7 +574,7 @@ function AppContent(): React.JSX.Element {
           style={styles.input}
           value={courseId}
           onChangeText={setCourseId}
-          placeholder="e.g. CS101"
+          placeholder="e.g. SIO"
           placeholderTextColor="#aaa"
           autoCapitalize="none"
           editable={!active}
@@ -466,15 +614,11 @@ function AppContent(): React.JSX.Element {
         />
 
         <Text style={styles.label}>Student NMEC</Text>
-        <Text style={styles.infoText}>
-          Check the student's card first: only this student will be able to join the session on
-          this device.
-        </Text>
         <TextInput
           style={styles.input}
           value={studentNmec}
           onChangeText={setStudentNmec}
-          placeholder="e.g. 98765"
+          placeholder="e.g. 123123"
           placeholderTextColor="#aaa"
           keyboardType="numeric"
           editable={!active}

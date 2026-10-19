@@ -9,3 +9,6 @@ class Device(Base):
     last_online = Column(DateTime)
     last_update = Column(DateTime)
     device_api_key_hash = Column(String(64), unique=True, index=True, nullable=True)
+    # Audit: the enrolled Examiner App phone that created this device
+    # (docs/examiner-phone-enrollment.md). Null for devices created before.
+    created_by_phone_id = Column(Integer, nullable=True)

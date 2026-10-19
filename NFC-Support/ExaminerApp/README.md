@@ -67,9 +67,16 @@ and the single-use server confirmation.
 - A Pi set up per `../../device-build/README.md` (PN532 over I2C,
   `nfc-reader.service` running `reader_script.py`)
 
-Plain `http://` API URLs are allowed
-(`res/xml/network_security_config.xml`), since a self-hosted API on a
-room's LAN usually has no TLS certificate.
+- The deployment's CA certificate (`pie-api-main/certs/ca.crt`, see
+  `../../pie-api-main/README.md`) installed on the phone once: copy it to
+  the phone, then Settings → Security → Encryption & credentials → Install a
+  certificate → CA certificate.
+
+The app talks to the API over HTTPS only. The login refuses `http://` URLs,
+and `res/xml/network_security_config.xml` forbids cleartext traffic and
+trusts user-installed CAs besides the system ones, so the deployment's own
+CA is accepted. The debug build (`src/debug/res/xml/`) also allows plain
+HTTP to `localhost`, `127.0.0.1` and `10.0.2.2`, for the Metro bundler.
 
 ## Run the app
 
@@ -118,10 +125,18 @@ adb reverse tcp:8081 tcp:8081
 
 ### Log in
 
-1. Enter the **PIE API Server URL** (e.g. `http://192.168.1.50:8000`) — the
+1. Enter the **PIE API Server URL** (e.g. `https://192.168.1.50:8000`) — the
    address the Pi will also use, so it must be reachable from the exam
    room's network, not just from the phone.
 2. Enter a teacher/admin **Email** and **Password** and log in.
+3. On the first login the app **enrolls the phone**: it creates a key in the
+   Android Keystore and gets a client certificate for it from the server.
+   Device creation and session provisioning then go to the server's phone
+   port (`8443`) with that certificate. The status box shows "This phone is
+   enrolled as phone-N"; until then those actions are disabled. If the
+   server rejects the phone (revoked, enrolled by another teacher, or
+   enrolled with another server), use **Re-enroll This Phone**. See
+   `../../pie-api-main/docs/examiner-phone-enrollment.md`.
 
 ### Claim a new device (once per Pi)
 

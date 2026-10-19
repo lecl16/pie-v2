@@ -18,4 +18,11 @@ class Config:
     LOG_RETENTION_DAYS: int = int(os.getenv('LOG_RETENTION_DAYS', '7'))
     LOG_MAX_STREAM_LENGTH: int = int(os.getenv('LOG_MAX_STREAM_LENGTH', '1000'))
 
+    # Examiner App phone enrollment (docs/examiner-phone-enrollment.md)
+    PHONE_CA_CERT_PATH: str = os.getenv('PHONE_CA_CERT_PATH', 'certs/phone-ca.crt')
+    PHONE_CA_KEY_PATH: str = os.getenv('PHONE_CA_KEY_PATH', 'certs/phone-ca.key')
+    PHONE_CERT_DAYS: int = int(os.getenv('PHONE_CERT_DAYS', '365'))
+    # The port Caddy serves with a required phone certificate (Caddyfile).
+    PHONE_MTLS_PORT: int = int(os.getenv('PHONE_MTLS_PORT', '8443'))
+
 config = Config()

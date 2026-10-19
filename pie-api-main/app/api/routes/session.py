@@ -17,7 +17,8 @@ from app.schemas.device_provisioning_secret import (
     DeviceProvisioningSecretRegister,
     DeviceProvisioningSecretRegistered,
 )
-from app.core.auth import get_teacher_or_admin_user
+from app.core.auth import get_examiner_phone
+from app.models.db.examiner_phone import ExaminerPhone
 import os
 import mimetypes
 import zipfile
@@ -790,9 +791,11 @@ def register_provisioning_secret(
     device_id: int,
     payload: DeviceProvisioningSecretRegister,
     db: Session = Depends(get_db),
-    _current_user=Depends(get_teacher_or_admin_user),  # explicit: session_router's own
-    # default dependency is get_current_user (any authenticated role), not
-    # teacher/admin, and this registers an NFC provisioning secret.
+    # Explicit: session_router's own default dependency is get_current_user
+    # (any authenticated role). This one also requires teacher/admin, and
+    # that the request comes from that teacher's enrolled Examiner App phone
+    # (docs/examiner-phone-enrollment.md).
+    phone: ExaminerPhone = Depends(get_examiner_phone),
 ):
     """The examiner app, as the trusted node, registers the secret it just
     generated before delivering the same secret to the device over NFC — see
@@ -833,6 +836,7 @@ def register_provisioning_secret(
         existing.nmec = payload.nmec
         existing.expires_at = expires_at
         existing.claimed_at = None
+        existing.registered_by_phone_id = phone.id
     else:
         db.add(DeviceProvisioningSecret(
             device_id=device_id,
@@ -840,6 +844,7 @@ def register_provisioning_secret(
             secret=payload.secret,
             nmec=payload.nmec,
             expires_at=expires_at,
+            registered_by_phone_id=phone.id,
         ))
     db.commit()
 
@@ -855,7 +860,7 @@ def invalidate_provisioning_secret(
     session_id: int,
     device_id: int,
     db: Session = Depends(get_db),
-    _current_user=Depends(get_teacher_or_admin_user),
+    _phone: ExaminerPhone = Depends(get_examiner_phone),
 ):
     """The examiner backed out before tapping — drop the secret so it can't
     be confirmed later. A confirmed secret is kept: the student's join

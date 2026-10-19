@@ -15,5 +15,7 @@ COPY . .
 EXPOSE 8000
 
 # Run FastAPI
-CMD ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Plain HTTP: TLS is terminated by Caddy (docker-compose.yml, Caddyfile).
+CMD ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000", \
+     "--proxy-headers", "--forwarded-allow-ips", "*"]
 

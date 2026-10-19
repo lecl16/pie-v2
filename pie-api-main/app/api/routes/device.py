@@ -5,11 +5,12 @@ from hashlib import sha256
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
-from app.core.auth import get_device
+from app.core.auth import get_device, get_examiner_phone
 from app.core.database import get_db
 from app.core.security import generate_device_api_key, hash_device_key
 from app.models.db.device import Device
 from app.models.db.device_provisioning_secret import DeviceProvisioningSecret
+from app.models.db.examiner_phone import ExaminerPhone
 from app.models.db.session import Session as ExamSession
 from app.schemas.device import DeviceCreate, DeviceUpdate, DeviceOut, DeviceCreated
 from app.schemas.device_provisioning_secret import (
@@ -30,9 +31,20 @@ def b64u_decode(encoded: str) -> bytes:
 router = APIRouter()
 
 @router.post("/create", response_model=DeviceCreated)
-def create_device(device: DeviceCreate, db: Session = Depends(get_db)):
+def create_device(
+    device: DeviceCreate,
+    db: Session = Depends(get_db),
+    # Only an enrolled Examiner App phone mints device identities, since it
+    # is the one that delivers them in the registration tap
+    # (docs/examiner-phone-enrollment.md).
+    phone: ExaminerPhone = Depends(get_examiner_phone),
+):
     api_key = generate_device_api_key()
-    db_device = Device(**device.dict(), device_api_key_hash=hash_device_key(api_key))
+    db_device = Device(
+        **device.dict(),
+        device_api_key_hash=hash_device_key(api_key),
+        created_by_phone_id=phone.id,
+    )
     try:
         db.add(db_device)
         db.commit()

@@ -7,7 +7,7 @@ import com.facebook.react.uimanager.ViewManager
 
 class NfcHcePackage : ReactPackage {
     override fun createNativeModules(context: ReactApplicationContext): List<NativeModule> =
-        listOf(NfcHceModule(context))
+        listOf(NfcHceModule(context), PhoneCredentialModule(context))
 
     override fun createViewManagers(context: ReactApplicationContext): List<ViewManager<*, *>> =
         emptyList()

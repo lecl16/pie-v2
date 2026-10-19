@@ -5,7 +5,7 @@ from sqlalchemy.schema import CreateColumn
 from sqlalchemy.orm import sessionmaker
 from app.core.config import config
 from app.models.db.base import Base
-from app.models.db import course, device, device_provisioning_secret, exam, user, session, session_user, submission
+from app.models.db import course, device, device_provisioning_secret, exam, examiner_phone, user, session, session_user, submission
 
 logger = logging.getLogger("app.database")
 

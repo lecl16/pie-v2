@@ -31,15 +31,49 @@ All services are orchestrated with Docker Compose (`docker-compose.yml`).
 ### First-time setup
 
 Generate a `.env` file with unique, randomly-generated secrets (JWT signing key,
-MySQL passwords) for this deployment:
+MySQL passwords) and the TLS certificates for this deployment:
 
 ```bash
 ./scripts/setup.sh
 ```
 
 This only needs to run once per deployment. It creates `.env` from scratch and is
-safe to re-run — it will never overwrite an existing `.env`. See
-[Configuration](#configuration) for what it generates.
+safe to re-run — it will never overwrite an existing `.env` or certificate. See
+[Configuration](#configuration) for what it generates, and [HTTPS](#https) for the
+certificates.
+
+### HTTPS
+
+The API is reached over HTTPS only, through Caddy (`Caddyfile`), which terminates
+TLS in front of uvicorn:
+
+| Port | Who | Client certificate |
+|---|---|---|
+| `8000` | everyone: dashboard, Examiner App login and enrollment, exam devices | none |
+| `8443` | enrolled Examiner App phones: device creation, provisioning secrets | required, signed by the phone CA ([phone enrollment](docs/examiner-phone-enrollment.md)) |
+
+`setup.sh` calls `scripts/generate-certs.sh`, which creates, in `certs/` (never
+committed):
+
+| File | Purpose |
+|---|---|
+| `ca.crt` / `ca.key` | A private certificate authority for this deployment only. Created once. |
+| `server.crt` / `server.key` | The API's certificate, signed by that CA, valid for this machine's hostname, IPv4 addresses and `localhost`. |
+| `phone-ca.crt` / `phone-ca.key` | A second CA that only signs Examiner App phones' client certificates. Created once. |
+
+**Clients trust the CA, not the server certificate.** Install `ca.crt` once on the
+examiner's phone (Settings → Security → Encryption & credentials → Install a
+certificate → CA certificate) and in the browser used for the dashboard.
+
+**When the server's address changes** (another room or network), re-issue the server
+certificate for the new address and restart Caddy; the clients need no change:
+
+```bash
+./scripts/generate-certs.sh 192.168.1.50   # optionally also a hostname
+docker compose restart caddy
+```
+
+Check it from another machine with `curl --cacert certs/ca.crt https://<address>:8000/docs`.
 
 ### Run with Docker Compose
 
@@ -48,13 +82,14 @@ docker compose up --build
 ```
 
 This starts the API together with MySQL, Redis, Elasticsearch, Kibana, ClamAV, and
-phpMyAdmin. The API reloads automatically on code changes (`uvicorn --reload`, with
-the repo mounted as a volume).
+phpMyAdmin, with Caddy in front of the API (see [HTTPS](#https)); restart the API
+after code changes (`docker compose restart app`).
 
 | Service | URL |
 |---|---|
-| API | http://localhost:8000 |
-| API docs (Swagger UI) | http://localhost:8000/docs |
+| API | https://localhost:8000 |
+| API docs (Swagger UI) | https://localhost:8000/docs |
+| API, phone port (client certificate required) | https://localhost:8443 |
 | phpMyAdmin | http://localhost:8080 |
 | Kibana | http://localhost:5601 |
 | Elasticsearch | http://localhost:9200 |
@@ -65,11 +100,13 @@ the repo mounted as a volume).
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.api.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.api.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 You will need your own MySQL, Redis, Elasticsearch and ClamAV instances reachable at
-the hosts/ports configured in `.env`.
+the hosts/ports configured in `.env`. This serves plain HTTP on localhost, for
+development only. Do not expose it: the API trusts the phone-certificate header,
+which only Caddy may set ([phone enrollment](docs/examiner-phone-enrollment.md)).
 
 ## Configuration
 

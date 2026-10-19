@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  HTTPS only. The PIE API uses a certificate signed by its deployment's own
+  CA (pie-api-main/scripts/generate-certs.sh), which the examiner installs
+  on the phone as a user CA, so user CAs are trusted besides the system ones.
+  The debug build overrides this file (src/debug) to reach the Metro bundler.
+-->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true" />
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
 </network-security-config>

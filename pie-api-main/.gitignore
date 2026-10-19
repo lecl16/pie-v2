@@ -28,6 +28,7 @@ debug.log
 
 # Environment variables & secrets
 .env
+certs/
 .env.local
 .env.*.local
 

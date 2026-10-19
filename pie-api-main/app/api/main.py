@@ -11,6 +11,7 @@ from app.api.routes.device import router as device_router
 from app.api.routes.logs import router as logs_router
 from app.api.routes.screenshare import router as screenshare_router
 from app.api.routes.analytics import router as analytics_router
+from app.api.routes.examiner_phone import router as examiner_phone_router
 from app.services.pubsub_service import redis_pubsub
 from starlette.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
@@ -131,6 +132,7 @@ app.include_router(protected_device_router, prefix="/device", tags=["device"], d
 app.include_router(screenshare_router, prefix="/screenshare", tags=["screenshare"])
 app.include_router(logs_router, prefix="/logs", tags=["logs"], dependencies=[Depends(get_current_user)])
 app.include_router(analytics_router, prefix="/analytics", tags=["analytics"], dependencies=[Depends(get_teacher_or_admin_user)])
+app.include_router(examiner_phone_router, prefix="/examiner-phone", tags=["examiner-phone"], dependencies=[Depends(get_teacher_or_admin_user)])
 
 # Add CORS middleware
 app.add_middleware(
