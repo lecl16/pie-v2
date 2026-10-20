@@ -53,8 +53,6 @@ PN532_STATUS_ERROR_MASK = 0x3F
 PN532_STATUS_MORE_INFO_BIT = 0x40
 PN532_EXCHANGE_RESPONSE_LENGTH = 262  # PN532 frame payload ceiling per InDataExchange call
 
-WINDOW_STATE_FILE = Path(__file__).with_name("provision_window.json")
-
 # Delivered by an NFC identity-bootstrap tap (see
 # pie-api-main/docs/device-identity-nfc-bootstrap.md) on a freshly-flashed
 # device, or written manually per that doc's predecessor
@@ -84,11 +82,6 @@ DEVICE_CONFIG_FILE = Path("/etc/pie/device.json")
 # server and this device. Written only after the server has confirmed it
 # (see confirm_with_server()).
 SESSION_STATE_FILE = Path("/etc/pie/session.json")
-
-# Hard lock mode: provisioning is allowed only during a short, explicitly armed window.
-HARD_LOCK_MODE = True
-DEFAULT_WINDOW_SECONDS = 60
-MAX_WINDOW_SECONDS = 300
 
 HTTP_TIMEOUT_SECONDS = 10
 
@@ -189,46 +182,6 @@ def api_request(method: str, url: str, context, body: dict | None = None):
                 "Register the device again."
             ) from exc
         raise RuntimeError(f"Could not reach API at {url}: {exc.reason}") from exc
-
-
-def arm_provisioning_window(seconds: int):
-    """Opens the local hard-lock window. Purely local: the session and its
-    secret now come from the examiner app in the tap itself (see
-    on_connect()), so there is nothing to register with the API up front.
-
-    TODO: arming must not be manual. Today the window only opens when someone
-    runs `reader_script.py --arm` on the Pi, which an examiner can't do in the
-    exam room and which breaks the "single tap, no input on the device"
-    requirement (NFR4 in the thesis). Automate it, e.g. open the window when
-    the device is registered but not provisioned and DevApp starts waiting
-    for a session, keeping the window short and closing it after a tap."""
-    duration = max(1, min(seconds, MAX_WINDOW_SECONDS))
-    state = {"expiresAt": int(time.time()) + duration}
-    WINDOW_STATE_FILE.write_text(json.dumps(state) + "\n", encoding="utf-8")
-
-
-def clear_provisioning_window():
-    if WINDOW_STATE_FILE.exists():
-        WINDOW_STATE_FILE.unlink()
-
-
-def get_window_remaining_seconds() -> int:
-    if not WINDOW_STATE_FILE.exists():
-        return 0
-    try:
-        state = json.loads(WINDOW_STATE_FILE.read_text(encoding="utf-8"))
-        expires_at = int(state.get("expiresAt", 0))
-    except Exception:
-        return 0
-    remaining = expires_at - int(time.time())
-    return max(0, remaining)
-
-
-def is_window_open() -> bool:
-    remaining = get_window_remaining_seconds()
-    if remaining <= 0:
-        return False
-    return True
 
 
 def generate_reader_key() -> tuple[ec.EllipticCurvePrivateKey, bytes]:
@@ -427,10 +380,10 @@ def on_connect_claim(tag):
     """Claim-listener tap handler for an unclaimed device (DEVICE_CONFIG_FILE
     absent). Mirrors on_connect()'s SELECT-then-command shape, but issues
     INS_GET_DEVICE_IDENTITY instead of the session-provisioning challenge —
-    see pie-api-main/docs/device-identity-nfc-bootstrap.md section 2. Unlike
-    on_connect(), there is no hard-lock window to check: an unclaimed device
-    has no session to provision yet, so the only gate is whether the phone
-    happens to be holding a freshly-created, undelivered identity at all.
+    see pie-api-main/docs/device-identity-nfc-bootstrap.md section 2. An
+    unclaimed device has no session to provision yet, so the only gate is
+    whether the phone happens to be holding a freshly-created, undelivered
+    identity at all.
     The identity (it carries a live API key) comes back encrypted to this
     tap's reader key, same as a session payload."""
     try:
@@ -505,12 +458,13 @@ def on_connect(tag):
     section 2): the examiner app delivers a session-scoped secret it
     generated and already registered with the server, encrypted to this
     tap's reader key; this device then confirms it with the server before
-    accepting it."""
-    try:
-        if HARD_LOCK_MODE and not is_window_open():
-            print("Provisioning rejected: hard lock active and no open provisioning window.")
-            return False
+    accepting it.
 
+    There is no local arming step: any tap is accepted for processing, and
+    the server's confirmation is the gate. Only an enrolled examiner phone
+    can register a secret for this device and session, and the confirmation
+    succeeds once, within its TTL, over this device's TLS-PSK link."""
+    try:
         # 1) SELECT AID
         select_apdu = bytes([0x00, INS_SELECT_AID, 0x04, 0x00, len(AID), *AID, 0x00])
         _, sw = send_and_parse(tag, "SELECT AID", select_apdu)
@@ -544,12 +498,6 @@ def on_connect(tag):
 
         print("Provisioned exam session:")
         print(json.dumps(session, indent=2))
-
-        # Consume the window after a successful provisioning so a new explicit arm is needed.
-        if HARD_LOCK_MODE:
-            clear_provisioning_window()
-            print("Provisioning window consumed and locked.")
-
         return True
     except Exception as exc:
         print(f"Error: {exc}")
@@ -558,60 +506,13 @@ def on_connect(tag):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="NFC secure provisioning reader with hard lock mode"
-    )
-    parser.add_argument(
-        "--arm",
-        action="store_true",
-        help="Open provisioning window and exit",
-    )
-    parser.add_argument(
-        "--status",
-        action="store_true",
-        help="Show provisioning window status and exit",
-    )
-    parser.add_argument(
-        "--clear-window",
-        action="store_true",
-        help="Clear/lock provisioning window and exit",
-    )
-    parser.add_argument(
-        "--window-seconds",
-        type=int,
-        default=DEFAULT_WINDOW_SECONDS,
-        help=f"Provisioning window duration in seconds (1-{MAX_WINDOW_SECONDS})",
+        description="PIE NFC reader: claim listener, then session provisioning taps"
     )
     return parser.parse_args()
 
 
 def main():
-    args = parse_args()
-
-    if args.clear_window:
-        clear_provisioning_window()
-        print("Provisioning window cleared. Reader is locked.")
-        return
-
-    if args.arm:
-        arm_provisioning_window(args.window_seconds)
-        remaining = get_window_remaining_seconds()
-        print(f"Provisioning window armed for {remaining} seconds.")
-        return
-
-    if args.status:
-        remaining = get_window_remaining_seconds()
-        if remaining > 0:
-            print(f"Provisioning window OPEN ({remaining}s remaining).")
-        else:
-            print("Provisioning window CLOSED.")
-        return
-
-    if HARD_LOCK_MODE:
-        remaining = get_window_remaining_seconds()
-        if remaining > 0:
-            print(f"Hard lock mode ON. Current window open for {remaining}s.")
-        else:
-            print("Hard lock mode ON. Window closed. Run with --arm to accept provisioning.")
+    parse_args()
 
     # Integration of the NFC module through I2C.
     pn532 = init_pn532()

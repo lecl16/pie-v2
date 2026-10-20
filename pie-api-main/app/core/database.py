@@ -45,9 +45,18 @@ def _sync_existing_tables(connection):
 # Initialize tables (only run during first setup or migration)
 def init_db():
     with engine.connect() as connection:
-        # Base.metadata.drop_all(bind=connection) # ! WARNING ! This will delete all data
-        # Base.metadata.tables['submission'].drop(connection, checkfirst=True) # Drop a specific table
-        # Base.metadata.tables['session_user'].drop(connection, checkfirst=True) # Drop a specific table
-        # Base.metadata.tables['session'].drop(connection, checkfirst=True) # Drop a specific table
-        Base.metadata.create_all(bind=connection) # Create tables
-        _sync_existing_tables(connection) # Add columns/indexes to tables that already existed
+        # `app` and `device-api` both run this at startup: a MySQL named lock
+        # stops them from adding the same table or column at the same time.
+        use_lock = connection.dialect.name == "mysql"
+        if use_lock:
+            connection.execute(text("SELECT GET_LOCK('pie_init_db', 120)"))
+        try:
+            # Base.metadata.drop_all(bind=connection) # ! WARNING ! This will delete all data
+            # Base.metadata.tables['submission'].drop(connection, checkfirst=True) # Drop a specific table
+            # Base.metadata.tables['session_user'].drop(connection, checkfirst=True) # Drop a specific table
+            # Base.metadata.tables['session'].drop(connection, checkfirst=True) # Drop a specific table
+            Base.metadata.create_all(bind=connection) # Create tables
+            _sync_existing_tables(connection) # Add columns/indexes to tables that already existed
+        finally:
+            if use_lock:
+                connection.execute(text("SELECT RELEASE_LOCK('pie_init_db')"))

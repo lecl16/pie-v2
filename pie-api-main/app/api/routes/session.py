@@ -783,6 +783,15 @@ def _get_session_or_404(db: Session, course_id: str, exam_id: int, session_id: i
         raise HTTPException(status_code=404, detail="Session not found")
     return db_session
 
+def _attempt_in_progress_on_device(db: Session, device_id: int):
+    """The SessionUser of a student currently taking an exam on this device:
+    joined, not finished (no end_time), in a session that hasn't ended."""
+    return db.query(SessionUser).join(dbSession, SessionUser.session_id == dbSession.id).filter(
+        SessionUser.device_id == device_id,
+        SessionUser.end_time.is_(None),
+        dbSession.is_ended.isnot(True),
+    ).first()
+
 @router.post("/{session_id}/device/{device_id}/provisioning-secret", response_model=DeviceProvisioningSecretRegistered)
 def register_provisioning_secret(
     course_id: str,
@@ -805,11 +814,26 @@ def register_provisioning_secret(
     device (docs/tap-gated-student-join.md). Happens before the student
     joins, so no SessionUser is needed. Re-registering for the same device
     and session replaces the previous secret and student and resets it to
-    unconfirmed, so a wrong NMEC can be fixed before the student joins."""
+    unconfirmed, so a wrong NMEC can be fixed before the student joins.
+
+    Refused (409) while another attempt is in progress on this device: a
+    student has joined and not finished, and that session hasn't ended. A tap
+    would otherwise hand the seat to someone else mid-exam. Re-tapping for
+    the same session and student is still allowed."""
     db_session = _get_session_or_404(db, course_id, exam_id, session_id)
 
     if db.query(Device).filter(Device.id == device_id).first() is None:
         raise HTTPException(status_code=404, detail="Device not found")
+
+    in_progress = _attempt_in_progress_on_device(db, device_id)
+    if in_progress is not None and not (
+        in_progress.session_id == session_id and str(in_progress.user_nmec) == str(payload.nmec)
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Device in use: student {in_progress.user_nmec} is taking session "
+                   f"{in_progress.session_id} on this device",
+        )
 
     student = db.query(User).filter(User.nmec == payload.nmec).first()
     if student is None or student.role != "student":

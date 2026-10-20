@@ -141,7 +141,7 @@ adb reverse tcp:8081 tcp:8081
 ### Claim a new device (once per Pi)
 
 A freshly set-up Pi has no `/etc/pie/device.json`, so its reader runs a
-claim listener; no `--arm` is needed for this tap.
+claim listener.
 
 1. Under **Provision New Device**, enter a **Device Name** (e.g.
    `Sala 101 - PC03`) and tap **Create & Hold for Tap**. This calls
@@ -152,27 +152,24 @@ claim listener; no `--arm` is needed for this tap.
 
 ### Provision a session
 
-1. On the Pi, open the hard-lock window (session taps are rejected
-   otherwise):
+Nothing is needed on the Pi: it accepts the tap, and the server's
+confirmation decides whether the session is applied.
 
-   ```bash
-   sudo /opt/nfc-reader/venv/bin/python /opt/nfc-reader/reader_script.py --arm   # default 60 s, max 300 (--window-seconds)
-   ```
-
-   `--status` shows the remaining time, `--clear-window` locks immediately.
-2. Check the student's card. In the app, fill **Course ID**, **Exam ID**,
+1. Check the student's card. In the app, fill **Course ID**, **Exam ID**,
    **Session ID**, **Device ID** and **Student NMEC**, then tap **Generate
    Secret & Activate**. The app generates a secret in native code and
    registers it, with the NMEC, via
    `POST /course/{c}/{e}/{s}/device/{d}/provisioning-secret` (valid 5
    minutes). Only that student can then join the session on this device
    (`../../pie-api-main/docs/tap-gated-student-join.md`); to fix a wrong
-   NMEC, register and tap again before the student joins.
-3. Tap the phone against the Pi's reader. The Pi decrypts the payload,
+   NMEC, register and tap again before the student joins. While a
+   student is taking an exam on that device (joined, not finished, session
+   not ended), the server refuses a registration for another student or
+   session with HTTP 409 "Device in use".
+2. Tap the phone against the Pi's reader. The Pi decrypts the payload,
    confirms it with the server, saves it to `/etc/pie/session.json` and
-   updates `apiBaseUrl` in `/etc/pie/device.json`. A successful tap consumes
-   the window, so the next device needs a new `--arm`.
-4. Tap **Deactivate Secure Provisioning** when done. This also deletes the
+   updates `apiBaseUrl` in `/etc/pie/device.json`.
+3. Tap **Deactivate Secure Provisioning** when done. This also deletes the
    registered secret on the server (best effort) if it wasn't used.
 
 ## Android NFC files
