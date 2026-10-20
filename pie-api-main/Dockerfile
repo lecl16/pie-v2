@@ -1,5 +1,6 @@
 # Base Image
-FROM python:3.11
+# 3.13+: ssl's TLS-PSK callbacks, used by the device port (app/device_tls_server.py)
+FROM python:3.13
 
 # Set working directory
 WORKDIR /app

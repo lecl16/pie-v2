@@ -50,6 +50,8 @@ from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from pie_tls import device_api_url, device_tls_context
+
 # Same file reader_script.py's claim_identity() writes — this server only
 # ever reads it, never writes it, so there's no coordination needed beyond
 # both processes agreeing on the path.
@@ -165,11 +167,14 @@ def expire_ended_session():
         session = json.loads(SESSION_STATE_FILE.read_text(encoding="utf-8"))
         device_id = int(config["deviceId"])
         session_id = int(session["sessionId"])
-        url = f"{config['apiBaseUrl'].rstrip('/')}/device/{device_id}/session/{session_id}/status"
+        # The device port (TLS-PSK, see pie_tls.py): the key below only
+        # goes to a server that proved it holds this device's key.
+        url = f"{device_api_url(config['apiBaseUrl'])}/device/{device_id}/session/{session_id}/status"
         request = urllib.request.Request(url, headers={"X-Device-Key": config["deviceApiKey"]})
-        with urllib.request.urlopen(request, timeout=5) as response:
+        context = device_tls_context(device_id, config["deviceApiKey"])
+        with urllib.request.urlopen(request, timeout=5, context=context) as response:
             body = json.loads(response.read().decode("utf-8"))
-    except (OSError, ValueError, KeyError, urllib.error.URLError) as exc:
+    except (OSError, ValueError, KeyError, RuntimeError, urllib.error.URLError) as exc:
         print(f"Session status check skipped: {exc}")
         return
 

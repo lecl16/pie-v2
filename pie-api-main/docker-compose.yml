@@ -2,6 +2,7 @@ services:
   app:
     build: .
     container_name: pie_api
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
@@ -23,6 +24,33 @@ services:
 
     command: ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000",
               "--proxy-headers", "--forwarded-allow-ips", "*"]
+
+  # The device port: TLS-PSK for the exam devices (app/device_tls_server.py,
+  # docs/device-tls-psk.md). Same image and code as `app`; published
+  # directly, since Caddy cannot terminate TLS-PSK.
+  device-api:
+    build: .
+    container_name: pie_device_api
+    # Both this and `app` update the schema at startup, one at a time
+    # (a MySQL lock in app/core/database.py).
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      elasticsearch:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Lisbon
+    ports:
+      - "8444:8444"
+    volumes:
+      - .:/app
+      - app_files:/home
+    command: ["python", "-m", "app.device_tls_server"]
 
   # HTTPS for everyone on 8000; HTTPS with a required phone client
   # certificate on 8443 (see Caddyfile).

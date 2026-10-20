@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import secrets
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -17,6 +18,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+from pie_tls import device_api_url, device_tls_context
 
 AID = bytes([0xF0, 0x45, 0x58, 0x4D, 0x41, 0x50, 0x50, 0x31])
 
@@ -159,31 +162,46 @@ def write_json_atomic(path: Path, content: dict):
     tmp_path.replace(path)
 
 
-def api_request(method: str, url: str, body: dict | None = None):
+def api_request(method: str, url: str, context, body: dict | None = None):
     """Minimal JSON HTTP client using only the stdlib (no `requests` dependency
-    to add to this device's already-narrow venv install list).
+    to add to this device's already-narrow venv install list), over TLS with
+    this device's pre-shared key (`context`, see pie_tls.py).
 
     Deliberately sends no device API key: the only call this script makes is
     confirm_with_server(), which authenticates by proving possession of the
-    session secret instead — so a tap carrying a rogue `apiBaseUrl` can't
-    trick this device into sending its long-lived key to that URL."""
+    session secret instead. The PSK handshake also fails against any server
+    that doesn't hold this device's key, before anything is sent — so a tap
+    carrying a rogue `apiBaseUrl` reaches nothing."""
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     if data is not None:
         req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as resp:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS, context=context) as resp:
             return resp.status, resp.read()
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read()
     except urllib.error.URLError as exc:
+        if isinstance(exc.reason, ssl.SSLError):
+            raise RuntimeError(
+                f"TLS handshake with {url} failed: the server doesn't accept this "
+                "device's key (not registered with it, or its key was rotated). "
+                "Register the device again."
+            ) from exc
         raise RuntimeError(f"Could not reach API at {url}: {exc.reason}") from exc
 
 
 def arm_provisioning_window(seconds: int):
     """Opens the local hard-lock window. Purely local: the session and its
     secret now come from the examiner app in the tap itself (see
-    on_connect()), so there is nothing to register with the API up front."""
+    on_connect()), so there is nothing to register with the API up front.
+
+    TODO: arming must not be manual. Today the window only opens when someone
+    runs `reader_script.py --arm` on the Pi, which an examiner can't do in the
+    exam room and which breaks the "single tap, no input on the device"
+    requirement (NFR4 in the thesis). Automate it, e.g. open the window when
+    the device is registered but not provisioned and DevApp starts waiting
+    for a session, keeping the window short and closing it after a tap."""
     duration = max(1, min(seconds, MAX_WINDOW_SECONDS))
     state = {"expiresAt": int(time.time()) + duration}
     WINDOW_STATE_FILE.write_text(json.dumps(state) + "\n", encoding="utf-8")
@@ -265,7 +283,7 @@ def confirm_proof(secret: bytes, label: str, device_id: int, session_id: int, no
     return b64u_encode(hmac.new(secret, message, sha256).digest())
 
 
-def confirm_with_server(api_base_url: str, device_id: int, session_id: int, secret: bytes) -> dict:
+def confirm_with_server(api_base_url: str, device_id: int, api_key: str, session_id: int, secret: bytes) -> dict:
     """Closes the loop on the examiner app acting as the trusted node: the
     phone gave the same secret to the server (teacher JWT) and to this
     device (the encrypted tap). Proving possession of it to the server, and
@@ -273,10 +291,12 @@ def confirm_with_server(api_base_url: str, device_id: int, session_id: int, secr
     from a phone the server trusts and that `api_base_url` is that server —
     decryption alone only proves the tap was not eavesdropped."""
     nonce_b64u = b64u_encode(secrets.token_bytes(16))
-    url = f"{api_base_url.rstrip('/')}/device/{device_id}/provisioning-secret/{session_id}/confirm"
+    # The device port (TLS-PSK), not the apiBaseUrl itself: see pie_tls.py.
+    url = f"{device_api_url(api_base_url)}/device/{device_id}/provisioning-secret/{session_id}/confirm"
     status, resp_body = api_request(
         "POST",
         url,
+        device_tls_context(device_id, api_key),
         body={
             "nonce": nonce_b64u,
             "mac": confirm_proof(secret, CONFIRM_LABEL_DEVICE, device_id, session_id, nonce_b64u),
@@ -310,7 +330,13 @@ def apply_session_provisioning(payload: dict) -> dict:
     api_base_url = str(payload["u"]).rstrip("/")
 
     device_config = load_device_config()
-    response = confirm_with_server(api_base_url, int(device_config["deviceId"]), session_id, secret)
+    response = confirm_with_server(
+        api_base_url,
+        int(device_config["deviceId"]),
+        str(device_config["deviceApiKey"]),
+        session_id,
+        secret,
+    )
 
     if device_config["apiBaseUrl"] != api_base_url:
         device_config["apiBaseUrl"] = api_base_url
@@ -328,12 +354,22 @@ def apply_session_provisioning(payload: dict) -> dict:
     return {k: v for k, v in session_state.items() if k != "secret"}
 
 
-def init_pn532() -> PN532_I2C:
+def init_pn532(attempts: int = 5) -> PN532_I2C:
+    # Right after a restart (e.g. the claim tap's), the chip can still be
+    # busy with the phone and miss the first command; retry before giving up.
     i2c = busio.I2C(board.SCL, board.SDA)
-    pn532 = PN532_I2C(i2c, debug=False)
-    ic, ver, rev, support = pn532.firmware_version
+    for attempt in range(1, attempts + 1):
+        try:
+            pn532 = PN532_I2C(i2c, debug=False)
+            ic, ver, rev, support = pn532.firmware_version
+            pn532.SAM_configuration()
+            break
+        except (OSError, RuntimeError) as exc:
+            if attempt == attempts:
+                raise
+            print(f"PN532 not ready ({exc}); retrying ({attempt}/{attempts})...")
+            time.sleep(1)
     print(f"PN532 firmware v{ver}.{rev} detected (IC 0x{ic:02X}).")
-    pn532.SAM_configuration()
     return pn532
 
 

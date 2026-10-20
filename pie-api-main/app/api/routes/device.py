@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from app.core.auth import get_device, get_examiner_phone
 from app.core.database import get_db
+from app.core.device_psk import new_wrapped_psk
 from app.core.security import generate_device_api_key, hash_device_key
 from app.models.db.device import Device
 from app.models.db.device_provisioning_secret import DeviceProvisioningSecret
@@ -47,6 +48,8 @@ def create_device(
     )
     try:
         db.add(db_device)
+        db.flush()  # the id is part of the PSK's derivation
+        db_device.tls_psk_enc = new_wrapped_psk(api_key, db_device.id)
         db.commit()
         db.refresh(db_device)
     except Exception as e:
@@ -100,13 +103,16 @@ def rotate_device_key(device_id: int, db: Session = Depends(get_db)):
     step 1 of that doc's two-step reset procedure: rotate here first, only
     then clear the device's local /etc/pie/device.json, never the reverse.
     Like `POST /create`, the plaintext key is returned once and never
-    stored or retrievable in plaintext again."""
+    stored or retrievable in plaintext again. Also replaces the device's
+    TLS pre-shared key, which is derived from it (docs/device-tls-psk.md),
+    so the old key stops working on the device port too."""
     device = db.query(Device).filter(Device.id == device_id).first()
     if device is None:
         raise HTTPException(status_code=404, detail="Device not found")
 
     api_key = generate_device_api_key()
     device.device_api_key_hash = hash_device_key(api_key)
+    device.tls_psk_enc = new_wrapped_psk(api_key, device.id)
     db.commit()
     db.refresh(device)
     return DeviceCreated(

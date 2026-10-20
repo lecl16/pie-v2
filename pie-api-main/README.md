@@ -51,6 +51,7 @@ TLS in front of uvicorn:
 |---|---|---|
 | `8000` | everyone: dashboard, Examiner App login and enrollment, exam devices | none |
 | `8443` | enrolled Examiner App phones: device creation, provisioning secrets | required, signed by the phone CA ([phone enrollment](docs/examiner-phone-enrollment.md)) |
+| `8444` | exam devices (Pis): confirm and status only | none: TLS-PSK with a per-device key, served by the `device-api` service, not Caddy ([device TLS-PSK](docs/device-tls-psk.md)) |
 
 `setup.sh` calls `scripts/generate-certs.sh`, which creates, in `certs/` (never
 committed):
@@ -90,6 +91,7 @@ after code changes (`docker compose restart app`).
 | API | https://localhost:8000 |
 | API docs (Swagger UI) | https://localhost:8000/docs |
 | API, phone port (client certificate required) | https://localhost:8443 |
+| API, device port (TLS-PSK, exam devices only) | https://localhost:8444 |
 | phpMyAdmin | http://localhost:8080 |
 | Kibana | http://localhost:5601 |
 | Elasticsearch | http://localhost:9200 |
