@@ -342,7 +342,7 @@ class Logger {
 
     if (!Config.isDataSet) return http.Response('User data not set', 400);
 
-    var response = await http.post(
+    var response = await Config.api.post(
       Uri.parse("${Config.apiBaseUrl}/logs/session/${Config.getFromConfigMap('sessionID')}/user/${Config.getFromConfigMap('nmec')}"),
       headers: {
         "Content-Type": "application/json",

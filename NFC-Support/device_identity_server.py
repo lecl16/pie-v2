@@ -18,6 +18,13 @@ refreshed by every confirmed session tap — see
 pie-api-main/docs/examiner-trusted-node-provisioning.md section 5), and
 DevApp-main picks it up from here.
 
+With it, `GET /device-identity` serves `caCert`: the deployment CA that
+DevApp-main uses to verify the server's certificate (its only trust
+anchor for the API). The Pi fetches it from the server over its TLS-PSK
+port, so it comes from the server that holds this device's key — see
+pie-api-main/docs/exam-app-tls.md. Until it has one for the current
+`apiBaseUrl`, `/device-identity` answers 503 and DevApp-main keeps waiting.
+
 It also serves `GET /session` (pie-api-main/docs/tap-gated-student-join.md
 section 3): the session this Pi was provisioned for by the last confirmed
 tap, the student the examiner assigned to it, and a `joinKey` derived from
@@ -42,6 +49,8 @@ it into normal mode right after a claim — see run_claim_listener()).
 import base64
 import hmac
 import json
+import os
+import ssl
 import threading
 import time
 import urllib.error
@@ -60,6 +69,13 @@ DEVICE_CONFIG_FILE = Path("/etc/pie/device.json")
 # confirmed session tap. Only ever deleted here (expire_ended_session()),
 # never written.
 SESSION_STATE_FILE = Path("/etc/pie/session.json")
+
+# The deployment CA fetched from the server (see refresh_server_ca()), with
+# the apiBaseUrl it was fetched for. Public, so 0644; written only here.
+SERVER_CA_FILE = Path("/etc/pie/server-ca.json")
+# Re-fetched this often, so a re-created CA reaches the exam app without a
+# new tap.
+SERVER_CA_REFRESH_SECONDS = 3600
 
 SESSION_CHECK_SECONDS = 30
 
@@ -114,6 +130,14 @@ class DeviceIdentityHandler(BaseHTTPRequestHandler):
         except Exception:
             self._respond(500, {"error": "device.json unreadable or malformed"})
             return
+
+        ca_cert = current_server_ca(config) or refresh_server_ca(throttle=True)
+        if not ca_cert:
+            # DevApp-main can't reach the server without it; it retries
+            # like it does for "unclaimed".
+            self._respond(503, {"error": "server CA not fetched yet"})
+            return
+        identity["caCert"] = ca_cert
 
         self._respond(200, identity)
 
@@ -183,9 +207,74 @@ def expire_ended_session():
         print(f"Session {session_id} is no longer active; removed {SESSION_STATE_FILE}.")
 
 
+def current_server_ca(config: dict, max_age: float | None = None) -> str | None:
+    """The cached CA, if it was fetched for this apiBaseUrl (and, with
+    max_age, recently enough)."""
+    try:
+        cached = json.loads(SERVER_CA_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if cached.get("apiBaseUrl") != config.get("apiBaseUrl"):
+        return None
+    if max_age is not None and time.time() - float(cached.get("fetchedAt", 0)) > max_age:
+        return None
+    return cached.get("caCert") or None
+
+
+_ca_lock = threading.Lock()
+_ca_last_failure = 0.0
+# DevApp-main polls /device-identity every few seconds; while the server is
+# unreachable, don't start a fetch (up to 5 s) on every one of those polls.
+CA_RETRY_SECONDS = 10
+
+
+def refresh_server_ca(throttle: bool = False) -> str | None:
+    """Fetches the deployment CA from the server's device port and caches
+    it. Returns it, or None if it couldn't be fetched (the cache is kept)."""
+    global _ca_last_failure
+    with _ca_lock:
+        if throttle and time.monotonic() - _ca_last_failure < CA_RETRY_SECONDS:
+            return None
+        try:
+            config = json.loads(DEVICE_CONFIG_FILE.read_text(encoding="utf-8"))
+            device_id = int(config["deviceId"])
+            # TLS-PSK (pie_tls.py): only the server holding this device's
+            # key completes the handshake, which is what makes this CA
+            # trustworthy for the exam app.
+            url = f"{device_api_url(config['apiBaseUrl'])}/device/{device_id}/server-ca"
+            request = urllib.request.Request(url, headers={"X-Device-Key": config["deviceApiKey"]})
+            context = device_tls_context(device_id, config["deviceApiKey"])
+            with urllib.request.urlopen(request, timeout=5, context=context) as response:
+                ca_cert = json.loads(response.read().decode("utf-8"))["caCert"]
+            ssl.PEM_cert_to_DER_cert(ca_cert)  # rejects anything that isn't one PEM certificate
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError, urllib.error.URLError) as exc:
+            print(f"Server CA fetch failed: {exc}")
+            _ca_last_failure = time.monotonic()
+            return None
+
+        if ca_cert != current_server_ca(config):
+            print(f"Server CA fetched for {config['apiBaseUrl']}.")
+        tmp_path = SERVER_CA_FILE.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps({
+            "apiBaseUrl": config["apiBaseUrl"],
+            "caCert": ca_cert,
+            "fetchedAt": int(time.time()),
+        }) + "\n", encoding="utf-8")
+        os.chmod(tmp_path, 0o644)
+        tmp_path.replace(SERVER_CA_FILE)
+        return ca_cert
+
+
 def session_expiry_loop():
     while True:
         expire_ended_session()
+        if DEVICE_CONFIG_FILE.exists():
+            try:
+                config = json.loads(DEVICE_CONFIG_FILE.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                config = None
+            if config and not current_server_ca(config, max_age=SERVER_CA_REFRESH_SECONDS):
+                refresh_server_ca()
         time.sleep(SESSION_CHECK_SECONDS)
 
 

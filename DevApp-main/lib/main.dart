@@ -7,7 +7,6 @@ import 'package:crypto/crypto.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'config.dart';
 import 'logger.dart';
@@ -158,7 +157,7 @@ class _ExamHomePageState extends State<ExamHomePage> {
     }
 
     try {
-      var response = await http.post(
+      var response = await Config.api.post(
         Uri.parse('${Config.apiBaseUrl}/users/login'),
         headers: {
           "Content-Type": "application/json",
@@ -212,7 +211,7 @@ class _ExamHomePageState extends State<ExamHomePage> {
 
     // try {
       final nonce = _b64uEncode(List<int>.generate(16, (_) => Random.secure().nextInt(256)));
-      var response = await http.post(
+      var response = await Config.api.post(
         Uri.parse('${Config.apiBaseUrl}/session-users/create'),
         headers: {
           "Content-Type": "application/json",

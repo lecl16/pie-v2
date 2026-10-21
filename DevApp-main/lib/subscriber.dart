@@ -62,7 +62,7 @@ class Subscriber {
     bool isConnected;
 
     try {
-      final response = await http.get(Uri.parse(Config.apiBaseUrl));
+      final response = await Config.api.get(Uri.parse(Config.apiBaseUrl));
       isConnected = (response.statusCode == 200);
     } catch (e) {
       isConnected = false;
@@ -125,7 +125,8 @@ class Subscriber {
   }
 
   void _startListening(String url) async {
-    var client = http.Client();
+    // Its own client (closed when the stream ends), with the API's trust.
+    var client = Config.newApiClient();
     var request = http.Request('GET', Uri.parse(url))
       ..headers.addAll({
         'Authorization': 'Bearer ${Config.getFromConfigMap('token')}',

@@ -51,7 +51,7 @@ TLS in front of uvicorn:
 |---|---|---|
 | `8000` | everyone: dashboard, Examiner App login and enrollment, exam devices | none |
 | `8443` | enrolled Examiner App phones: device creation, provisioning secrets | required, signed by the phone CA ([phone enrollment](docs/examiner-phone-enrollment.md)) |
-| `8444` | exam devices (Pis): confirm and status only | none: TLS-PSK with a per-device key, served by the `device-api` service, not Caddy ([device TLS-PSK](docs/device-tls-psk.md)) |
+| `8444` | exam devices (Pis): confirm, status and the CA they relay to the exam app ([exam app TLS](docs/exam-app-tls.md)) | none: TLS-PSK with a per-device key, served by the `device-api` service, not Caddy ([device TLS-PSK](docs/device-tls-psk.md)) |
 
 `setup.sh` calls `scripts/generate-certs.sh`, which creates, in `certs/` (never
 committed):

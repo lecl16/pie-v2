@@ -7,7 +7,7 @@ Serves the same FastAPI app as the main listener, but:
 - TLS 1.3 with a per-device pre-shared key only, no certificate. The
   handshake fails for an unknown device, a device without a key, or a
   wrong key, before any request is read.
-- Only the two routes the Pi calls are reachable; everything else is 404.
+- Only the routes the Pi calls are reachable; everything else is 404.
 - The phone-certificate header, which only Caddy may set, is stripped.
 
 Caddy cannot terminate TLS-PSK, so this uvicorn is published directly.
@@ -37,6 +37,7 @@ PSK_CACHE_SECONDS = 30
 ALLOWED_ROUTES = [
     ("POST", re.compile(r"^/device/\d+/provisioning-secret/\d+/confirm$")),
     ("GET", re.compile(r"^/device/\d+/session/\d+/status$")),
+    ("GET", re.compile(r"^/device/\d+/server-ca$")),
 ]
 
 _stripped_header = PHONE_CERT_HEADER.lower().encode("latin-1")

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from app.core.auth import get_device, get_examiner_phone
+from app.core.config import config
 from app.core.database import get_db
 from app.core.device_psk import new_wrapped_psk
 from app.core.security import generate_device_api_key, hash_device_key
@@ -227,3 +228,19 @@ def provisioned_session_status(
         and secret_row.claimed_at is not None
     )
     return {"active": active}
+
+@router.get("/{device_id}/server-ca")
+def server_ca(device_id: int, device: Device = Depends(get_device)):
+    """This deployment's CA certificate (PEM), which the Pi relays to the exam
+    app so it can verify this server's certificate (docs/exam-app-tls.md).
+    The Pi fetches it only over its TLS-PSK port, so it comes from the
+    server that holds this device's key. The CA is public; X-Device-Key only
+    keeps the route to registered devices, like the status route."""
+    if device.id != device_id:
+        raise HTTPException(status_code=403, detail="Not this device")
+    try:
+        with open(config.SERVER_CA_CERT_PATH, encoding="ascii") as ca_file:
+            pem = ca_file.read()
+    except OSError:
+        raise HTTPException(status_code=503, detail="Server CA not configured")
+    return {"caCert": pem}

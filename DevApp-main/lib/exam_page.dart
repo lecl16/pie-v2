@@ -107,7 +107,7 @@ class _ExamState extends State<Exam> {
     });
 
     try {
-      var response = await http.get(
+      var response = await Config.api.get(
         Uri.parse('${Config.apiBaseUrl}/course/${widget.courseID}/${widget.examID}/${widget.sessionID}/download'),
         headers: {
           'Authorization': 'Bearer ${Config.getFromConfigMap('token')}',
@@ -284,7 +284,7 @@ class _ExamState extends State<Exam> {
 
   void _startExam(String key) async {
     if (!widget.isAlreadyDownloaded && key != "" && widget.exam == 'files') {
-      http.post(
+      Config.api.post(
         Uri.parse('${Config.apiBaseUrl}/submission/${widget.sessionUserID}/start'),
         headers: {
           'Authorization': 'Bearer ${Config.getFromConfigMap('token')}',
@@ -390,7 +390,7 @@ class _ExamState extends State<Exam> {
     windowManager.grabKeyboard();
     windowManager.focus();
 
-    http.post(
+    Config.api.post(
       Uri.parse('${Config.apiBaseUrl}/submission/${widget.sessionUserID}/end'),
       headers: {
         'Authorization': 'Bearer ${Config.getFromConfigMap('token')}',
@@ -449,7 +449,7 @@ class _ExamState extends State<Exam> {
         'Authorization': 'Bearer ${Config.getFromConfigMap('token')}',
       });
     try {
-      var response = await request.send();
+      var response = await Config.api.send(request);
 
       if (response.statusCode == 200) {
         print('Exame submetido com sucesso');

@@ -110,6 +110,7 @@ app.include_router(
 DEVICE_SELF_AUTH_PATHS = {
     "/{device_id}/provisioning-secret/{session_id}/confirm",
     "/{device_id}/session/{session_id}/status",  # X-Device-Key (get_device)
+    "/{device_id}/server-ca",  # X-Device-Key (get_device)
 }
 device_self_auth_router = fastapi.APIRouter()
 for route in device_router.routes:

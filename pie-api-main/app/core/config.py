@@ -18,6 +18,10 @@ class Config:
     LOG_RETENTION_DAYS: int = int(os.getenv('LOG_RETENTION_DAYS', '7'))
     LOG_MAX_STREAM_LENGTH: int = int(os.getenv('LOG_MAX_STREAM_LENGTH', '1000'))
 
+    # This deployment's CA (scripts/generate-certs.sh). The Pis fetch it over
+    # their TLS-PSK port and relay it to the exam app (docs/exam-app-tls.md).
+    SERVER_CA_CERT_PATH: str = os.getenv('SERVER_CA_CERT_PATH', 'certs/ca.crt')
+
     # Examiner App phone enrollment (docs/examiner-phone-enrollment.md)
     PHONE_CA_CERT_PATH: str = os.getenv('PHONE_CA_CERT_PATH', 'certs/phone-ca.crt')
     PHONE_CA_KEY_PATH: str = os.getenv('PHONE_CA_KEY_PATH', 'certs/phone-ca.key')
