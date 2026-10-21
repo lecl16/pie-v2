@@ -33,6 +33,11 @@ ALLOWED_ENTRIES = set()
 # pages themselves (navigations) must match an entry.
 allowed_page_origins = set()
 
+# Origins of files let through for an allowed page (e.g. a CDN). Files they
+# load in turn (fonts and images referenced by a CDN's stylesheet, whose
+# Referer is that stylesheet) are allowed too. Pages on these hosts are not.
+allowed_file_origins = set()
+
 _whitelist_stat = None
 
 
@@ -75,13 +80,21 @@ def entry_matches(entry, url):
     return entry.endswith("/") or rest == "" or rest[0] in "/?#"
 
 
-def is_allowed_url(url):
+def is_allowed_url(url, http_upgrade=False):
     normalized = normalize(url)
     if normalized is None:
         return False
     if urlsplit(normalized).hostname in WHITELIST_HOSTS:
         return True
-    return any(entry_matches(entry, normalized) for entry in ALLOWED_ENTRIES)
+    if any(entry_matches(entry, normalized) for entry in ALLOWED_ENTRIES):
+        return True
+    # Typing "www.sony.pt" makes Firefox ask for http:// first; let that
+    # page through when its https:// address is allowed, so the site can
+    # redirect to it.
+    if http_upgrade and normalized.startswith("http://"):
+        upgraded = "https://" + normalized[len("http://"):]
+        return any(entry_matches(entry, upgraded) for entry in ALLOWED_ENTRIES)
+    return False
 
 
 def reload_whitelist():
@@ -133,14 +146,20 @@ def request(flow: http.HTTPFlow) -> None:
 
     url = flow.request.pretty_url
 
-    if is_allowed_url(url):
+    if is_allowed_url(url, http_upgrade=is_navigation(flow)):
         if is_navigation(flow):
             allowed_page_origins.add(origin_of(url))
+        else:
+            allowed_file_origins.add(origin_of(url))
         return
 
     if not is_navigation(flow):
         referer = flow.request.headers.get("Referer")
-        if referer and origin_of(referer) in allowed_page_origins:
+        referer_origin = origin_of(referer) if referer else None
+        if referer_origin and (
+            referer_origin in allowed_page_origins or referer_origin in allowed_file_origins
+        ):
+            allowed_file_origins.add(origin_of(url))
             return
 
     flow.response = http.Response.make(
@@ -160,7 +179,7 @@ def response(flow: http.HTTPFlow) -> None:
         if location:
             full_redirect_url = urljoin(flow.request.url, location)
 
-            if not is_allowed_url(full_redirect_url):
+            if not is_allowed_url(full_redirect_url, http_upgrade=True):
                 flow.response = http.Response.make(
                     403,
                     b"Access denied: Redirect to unauthorized URL.",

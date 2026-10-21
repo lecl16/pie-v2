@@ -1,11 +1,13 @@
 [Unit]
-Description=Start mitmproxy once to generate cert
-After=network.target
+Description=Create the mitmproxy CA and publish it for Firefox
+# Before the login screen, so Firefox finds the certificate on first start.
+Before=display-manager.service
+After=local-fs.target
 
 [Service]
-ExecStart=/usr/local/bin/init-mitmproxy.sh
 Type=oneshot
+ExecStart=/usr/local/bin/init-mitmproxy.sh
+RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
-

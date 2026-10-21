@@ -1,0 +1,7 @@
+{
+  "policies": {
+    "Certificates": {
+      "Install": ["/usr/local/share/pie/mitmproxy-ca-cert.pem"]
+    }
+  }
+}
