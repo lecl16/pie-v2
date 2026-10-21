@@ -14,7 +14,7 @@ import { Calendar } from "@/components/ui/calendar"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Switch } from "@/components/ui/switch"
-import { cn } from "@/lib/utils"
+import { cn, DEFAULT_ALLOWED_LINKS } from "@/lib/utils"
 import BackButton from "@/components/back-button"
 import { examService } from "@/api/services/examService"
 import { sessionService } from "@/api/services/sessionService"
@@ -53,7 +53,7 @@ export default function CreateExamForm() {
   const t = useTranslations();
   
   const [whitelistLink, setWhitelistLink] = useState("");
-  const [whitelistLinks, setWhitelistLinks] = useState([]);
+  const [whitelistLinks, setWhitelistLinks] = useState(DEFAULT_ALLOWED_LINKS);
   const [whitelistedStudents, setWhitelistedStudents] = useState([]);
   const fileInputRef = useRef(null);
 

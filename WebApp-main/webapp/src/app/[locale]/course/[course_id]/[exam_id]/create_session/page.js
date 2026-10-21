@@ -22,7 +22,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
+import { cn, DEFAULT_ALLOWED_LINKS } from "@/lib/utils";
 import { format } from "date-fns";
 import BackButton from "@/components/back-button";
 import { sessionService } from "@/api/services/sessionService";
@@ -61,7 +61,7 @@ export default function CreateSessionForm() {
   const [activeTab, setActiveTab] = useState("files");
   const [formError, setFormError] = useState("");
   const [whitelistLink, setWhitelistLink] = useState("");
-  const [whitelistLinks, setWhitelistLinks] = useState([]);
+  const [whitelistLinks, setWhitelistLinks] = useState(DEFAULT_ALLOWED_LINKS);
   const [whitelistedStudents, setWhitelistedStudents] = useState([]);
   const fileInputRef = useRef(null);
 
