@@ -18,9 +18,20 @@ from app.core.auth import get_examiner_phone, get_teacher_or_admin_user
 from app.core.config import config
 from app.core.database import get_db
 from app.core.phone_certs import InvalidCsr, certificate_pem, issue_phone_certificate, load_phone_csr
+from app.models.db.course import Course
+from app.models.db.device_provisioning_secret import DeviceProvisioningSecret
+from app.models.db.exam import Exam
 from app.models.db.examiner_phone import ExaminerPhone
+from app.models.db.session import Session as ExamSession
 from app.models.db.user import User
-from app.schemas.examiner_phone import ExaminerPhoneEnroll, ExaminerPhoneEnrolled, ExaminerPhoneOut
+from app.schemas.examiner_phone import (
+    ExaminerPhoneEnroll,
+    ExaminerPhoneEnrolled,
+    ExaminerPhoneOut,
+    ProvisioningSessionOut,
+    ProvisioningStudentOut,
+    ProvisioningStudentsOut,
+)
 
 logger = logging.getLogger("uvicorn.error")
 router = APIRouter()
@@ -101,3 +112,82 @@ def revoke_phone(
         db.refresh(phone)
         logger.info("Examiner phone %s revoked by user %s", phone.id, current_user.nmec)
     return phone
+
+
+# --- What the app's provisioning screen offers to pick from ---
+# Read-only, but limited like the trusted-node actions it feeds (enrolled
+# phone + its teacher), since the student list holds names and NMECs.
+
+@router.get("/provisioning/sessions", response_model=List[ProvisioningSessionOut])
+def provisioning_sessions(
+    db: Session = Depends(get_db),
+    phone: ExaminerPhone = Depends(get_examiner_phone),
+):
+    """Sessions not yet ended, newest date first, with their course and exam
+    names, so the examiner picks one instead of typing three IDs."""
+    rows = (
+        db.query(ExamSession, Course, Exam)
+        .outerjoin(Course, Course.id == ExamSession.course_id)
+        .outerjoin(Exam, Exam.id == ExamSession.exam_id)
+        .filter(ExamSession.is_ended.isnot(True))
+        .order_by(ExamSession.date.desc(), ExamSession.id.desc())
+        .all()
+    )
+    return [
+        ProvisioningSessionOut(
+            course_id=exam_session.course_id,
+            course_name=course.name if course else None,
+            exam_id=exam_session.exam_id,
+            exam_name=exam.name if exam else None,
+            session_id=exam_session.id,
+            session_name=exam_session.name,
+            room=exam_session.room,
+            date=exam_session.date,
+            is_started=bool(exam_session.is_started),
+        )
+        for exam_session, course, exam in rows
+    ]
+
+
+@router.get("/provisioning/sessions/{session_id}/students", response_model=ProvisioningStudentsOut)
+def provisioning_students(
+    session_id: int,
+    db: Session = Depends(get_db),
+    phone: ExaminerPhone = Depends(get_examiner_phone),
+):
+    """The session's allowed students, by name, with the device each one is
+    currently assigned to, so the examiner picks the student whose card they
+    checked instead of typing the NMEC."""
+    exam_session = db.query(ExamSession).filter(ExamSession.id == session_id).first()
+    if exam_session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    allowed = exam_session.allowed_students or []
+    if not allowed:
+        return ProvisioningStudentsOut(restricted=False, students=[])
+
+    assigned = {
+        row.nmec: row.device_id
+        for row in db.query(DeviceProvisioningSecret)
+        .filter(DeviceProvisioningSecret.session_id == session_id)
+        .all()
+        if row.nmec is not None
+    }
+    students = (
+        db.query(User)
+        .filter(User.email.in_(allowed), User.role == "student")
+        .order_by(User.name)
+        .all()
+    )
+    return ProvisioningStudentsOut(
+        restricted=True,
+        students=[
+            ProvisioningStudentOut(
+                nmec=student.nmec,
+                name=student.name,
+                email=student.email,
+                device_id=assigned.get(student.nmec),
+            )
+            for student in students
+        ],
+    )

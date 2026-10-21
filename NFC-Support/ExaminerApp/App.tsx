@@ -17,7 +17,7 @@
  * phone port with it — see pie-api-main/docs/examiner-phone-enrollment.md.
  */
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Image,
@@ -50,6 +50,40 @@ const SECRET_TTL_SECONDS = 300;
 interface ProvisionRegistration {
   sessionId: string;
   nmec: string;
+}
+
+// GET /examiner-phone/provisioning/sessions (pie-api-main): sessions not
+// yet ended, to pick from instead of typing course/exam/session IDs.
+interface ProvisioningSession {
+  course_id: string;
+  course_name?: string | null;
+  exam_id: number;
+  exam_name?: string | null;
+  session_id: number;
+  session_name?: string | null;
+  room?: string | null;
+  date?: string | null;
+  is_started: boolean;
+}
+
+// GET /examiner-phone/provisioning/sessions/{s}/students: the session's
+// allowed students, with the device each is already assigned to.
+interface ProvisioningStudent {
+  nmec: number;
+  name?: string | null;
+  email?: string | null;
+  device_id?: number | null;
+}
+
+// Rows shown before the examiner types in the student search box.
+const MAX_STUDENT_ROWS = 20;
+
+function sessionTitle(s: ProvisioningSession): string {
+  return [s.course_name ?? s.course_id, s.exam_name, s.session_name].filter(Boolean).join(' · ');
+}
+
+function sessionDetails(s: ProvisioningSession): string {
+  return [s.room, s.date, s.is_started ? 'started' : null].filter(Boolean).join(' · ');
 }
 
 interface NativeHceModule {
@@ -134,6 +168,20 @@ function AppContent(): React.JSX.Element {
   const [sessionId, setSessionId] = useState('');
   const [deviceId, setDeviceId] = useState('');
   const [studentNmec, setStudentNmec] = useState('');
+
+  // Picking the session and the student instead of typing their IDs. The
+  // manual fields stay available as a fallback.
+  const [sessions, setSessions] = useState<ProvisioningSession[] | null>(null);
+  const [sessionsStatus, setSessionsStatus] = useState('');
+  const [selectedSession, setSelectedSession] = useState<ProvisioningSession | null>(null);
+  const [manualIds, setManualIds] = useState(false);
+  // null: not loaded; restricted false: the session has no allowed-students
+  // list, so the NMEC is typed.
+  const [students, setStudents] = useState<{
+    restricted: boolean;
+    students: ProvisioningStudent[];
+  } | null>(null);
+  const [studentFilter, setStudentFilter] = useState('');
 
   const [newDeviceName, setNewDeviceName] = useState('');
   const [deviceBusy, setDeviceBusy] = useState(false);
@@ -247,7 +295,7 @@ function AppContent(): React.JSX.Element {
       const data = await response.json();
       setAccessToken(data.access_token);
       setLoggedInAs(data.email ?? email.trim());
-      setStatus('Logged in. Fill in course/exam/session/device to provision.');
+      setStatus('Logged in. Pick the session, then the device and student to provision.');
       await setUpPhone(data.access_token, false);
     } catch (err) {
       // fetch() reports a rejected certificate only as a network error.
@@ -279,6 +327,86 @@ function AppContent(): React.JSX.Element {
       `/device/${encodeURIComponent(deviceId.trim())}/provisioning-secret`,
     [phoneBaseUrl, courseId, examId, sessionId, deviceId],
   );
+
+  const loadSessions = useCallback(async () => {
+    if (!accessToken || !phoneBaseUrl) {
+      return;
+    }
+    setSessionsStatus('Loading sessions...');
+    try {
+      const response = await fetch(`${phoneBaseUrl}/examiner-phone/provisioning/sessions`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      }
+      const data: ProvisioningSession[] = await response.json();
+      setSessions(data);
+      setSessionsStatus(data.length ? '' : 'No open sessions. Create one in the dashboard.');
+    } catch (err) {
+      setSessions(null);
+      setSessionsStatus(`Could not load sessions: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [accessToken, phoneBaseUrl]);
+
+  const loadStudents = useCallback(
+    async (session: ProvisioningSession) => {
+      if (!accessToken || !phoneBaseUrl) {
+        return;
+      }
+      try {
+        const response = await fetch(
+          `${phoneBaseUrl}/examiner-phone/provisioning/sessions/${session.session_id}/students`,
+          { headers: { Authorization: `Bearer ${accessToken}` } },
+        );
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+        }
+        setStudents(await response.json());
+      } catch {
+        // Fall back to typing the NMEC; the server still checks it.
+        setStudents({ restricted: false, students: [] });
+      }
+    },
+    [accessToken, phoneBaseUrl],
+  );
+
+  // Once the phone is accepted, offer the open sessions.
+  useEffect(() => {
+    if (phoneBaseUrl && accessToken) {
+      loadSessions();
+    } else {
+      setSessions(null);
+      setSelectedSession(null);
+      setStudents(null);
+    }
+  }, [phoneBaseUrl, accessToken, loadSessions]);
+
+  const pickSession = useCallback(
+    (session: ProvisioningSession) => {
+      setSelectedSession(session);
+      setCourseId(session.course_id);
+      setExamId(String(session.exam_id));
+      setSessionId(String(session.session_id));
+      setStudentNmec('');
+      setStudentFilter('');
+      setStudents(null);
+      loadStudents(session);
+    },
+    [loadStudents],
+  );
+
+  // Back to the list: the IDs come from the next pick (or manual entry).
+  const changeSession = useCallback(() => {
+    setSelectedSession(null);
+    setCourseId('');
+    setExamId('');
+    setSessionId('');
+    setStudents(null);
+    setStudentNmec('');
+    setStudentFilter('');
+    loadSessions();
+  }, [loadSessions]);
 
   const registerAndActivate = useCallback(async () => {
     if (!nfcHceModule?.setSecureProvisioning || !nfcHceModule?.generateSecret) {
@@ -375,13 +503,22 @@ function AppContent(): React.JSX.Element {
 
     // Best-effort: drop the registered secret so it can no longer be
     // confirmed. If the tap already went through it's single-use anyway.
-    if (accessToken && phoneBaseUrl) {
-      fetch(provisioningSecretUrl(), {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }).catch(() => {});
+    const deleted =
+      accessToken && phoneBaseUrl
+        ? fetch(provisioningSecretUrl(), {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${accessToken}` },
+          }).catch(() => {})
+        : Promise.resolve();
+
+    // Ready for the next seat; the refreshed list shows this assignment.
+    setDeviceId('');
+    setStudentNmec('');
+    setStudentFilter('');
+    if (selectedSession) {
+      deleted.then(() => loadStudents(selectedSession));
     }
-  }, [accessToken, phoneBaseUrl, provisioningSecretUrl]);
+  }, [accessToken, phoneBaseUrl, provisioningSecretUrl, selectedSession, loadStudents]);
 
   const createAndHoldDeviceIdentity = useCallback(async () => {
     if (!nfcHceModule?.setPendingDeviceIdentity) {
@@ -569,60 +706,181 @@ function AppContent(): React.JSX.Element {
       ) : null}
 
       <View style={styles.card}>
-        <Text style={styles.label}>Course ID</Text>
-        <TextInput
-          style={styles.input}
-          value={courseId}
-          onChangeText={setCourseId}
-          placeholder="e.g. SIO"
-          placeholderTextColor="#aaa"
-          autoCapitalize="none"
-          editable={!active}
-        />
+        <Text style={styles.infoTitle}>Session</Text>
+        {manualIds ? (
+          <>
+            <Text style={styles.label}>Course ID</Text>
+            <TextInput
+              style={styles.input}
+              value={courseId}
+              onChangeText={setCourseId}
+              placeholder="e.g. SIO"
+              placeholderTextColor="#aaa"
+              autoCapitalize="none"
+              editable={!active}
+            />
 
-        <Text style={styles.label}>Exam ID</Text>
-        <TextInput
-          style={styles.input}
-          value={examId}
-          onChangeText={setExamId}
-          placeholder="e.g. 1"
-          placeholderTextColor="#aaa"
-          keyboardType="numeric"
-          editable={!active}
-        />
+            <Text style={styles.label}>Exam ID</Text>
+            <TextInput
+              style={styles.input}
+              value={examId}
+              onChangeText={setExamId}
+              placeholder="e.g. 1"
+              placeholderTextColor="#aaa"
+              keyboardType="numeric"
+              editable={!active}
+            />
 
-        <Text style={styles.label}>Session ID</Text>
-        <TextInput
-          style={styles.input}
-          value={sessionId}
-          onChangeText={setSessionId}
-          placeholder="e.g. 1"
-          placeholderTextColor="#aaa"
-          keyboardType="numeric"
-          editable={!active}
-        />
+            <Text style={styles.label}>Session ID</Text>
+            <TextInput
+              style={styles.input}
+              value={sessionId}
+              onChangeText={setSessionId}
+              placeholder="e.g. 1"
+              placeholderTextColor="#aaa"
+              keyboardType="numeric"
+              editable={!active}
+            />
+            {!active ? (
+              <TouchableOpacity
+                style={styles.secondaryBtn}
+                onPress={() => {
+                  setManualIds(false);
+                  changeSession();
+                }}
+              >
+                <Text style={styles.secondaryBtnText}>Pick From List</Text>
+              </TouchableOpacity>
+            ) : null}
+          </>
+        ) : selectedSession ? (
+          <>
+            <View style={[styles.pickRow, styles.pickRowSelected]}>
+              <Text style={styles.pickTitle}>{sessionTitle(selectedSession)}</Text>
+              <Text style={styles.pickDetails}>{sessionDetails(selectedSession)}</Text>
+            </View>
+            {!active ? (
+              <TouchableOpacity style={styles.secondaryBtn} onPress={changeSession}>
+                <Text style={styles.secondaryBtnText}>Change Session</Text>
+              </TouchableOpacity>
+            ) : null}
+          </>
+        ) : (
+          <>
+            {!phoneBaseUrl ? (
+              <Text style={styles.infoText}>Log in on an enrolled phone to list the sessions.</Text>
+            ) : null}
+            {sessionsStatus ? <Text style={styles.infoText}>{sessionsStatus}</Text> : null}
+            {(sessions ?? []).map(session => (
+              <TouchableOpacity
+                key={session.session_id}
+                style={styles.pickRow}
+                onPress={() => pickSession(session)}
+              >
+                <Text style={styles.pickTitle}>{sessionTitle(session)}</Text>
+                <Text style={styles.pickDetails}>{sessionDetails(session)}</Text>
+              </TouchableOpacity>
+            ))}
+            {phoneBaseUrl ? (
+              <TouchableOpacity style={styles.secondaryBtn} onPress={loadSessions}>
+                <Text style={styles.secondaryBtnText}>Refresh</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity style={styles.secondaryBtn} onPress={() => setManualIds(true)}>
+              <Text style={styles.secondaryBtnText}>Enter IDs Manually</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
 
-        <Text style={styles.label}>Device ID</Text>
+      <View style={styles.card}>
+        <Text style={styles.infoTitle}>Seat</Text>
+        <Text style={styles.label}>Device ID (on the device's label)</Text>
         <TextInput
           style={styles.input}
           value={deviceId}
           onChangeText={setDeviceId}
-          placeholder="e.g. 1"
+          placeholder="e.g. 10"
           placeholderTextColor="#aaa"
           keyboardType="numeric"
           editable={!active}
         />
 
-        <Text style={styles.label}>Student NMEC</Text>
-        <TextInput
-          style={styles.input}
-          value={studentNmec}
-          onChangeText={setStudentNmec}
-          placeholder="e.g. 123123"
-          placeholderTextColor="#aaa"
-          keyboardType="numeric"
-          editable={!active}
-        />
+        <Text style={styles.label}>Student</Text>
+        {!manualIds && students?.restricted ? (
+          (() => {
+            const picked = students.students.find(st => String(st.nmec) === studentNmec);
+            if (picked) {
+              return (
+                <>
+                  <View style={[styles.pickRow, styles.pickRowSelected]}>
+                    <Text style={styles.pickTitle}>{picked.name ?? picked.email}</Text>
+                    <Text style={styles.pickDetails}>NMEC {picked.nmec}</Text>
+                  </View>
+                  {!active ? (
+                    <TouchableOpacity style={styles.secondaryBtn} onPress={() => setStudentNmec('')}>
+                      <Text style={styles.secondaryBtnText}>Change Student</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </>
+              );
+            }
+            const query = studentFilter.trim().toLowerCase();
+            const matches = students.students.filter(
+              st =>
+                !query ||
+                String(st.nmec).includes(query) ||
+                (st.name ?? '').toLowerCase().includes(query) ||
+                (st.email ?? '').toLowerCase().includes(query),
+            );
+            return (
+              <>
+                <TextInput
+                  style={styles.input}
+                  value={studentFilter}
+                  onChangeText={setStudentFilter}
+                  placeholder="Search name, NMEC or email"
+                  placeholderTextColor="#aaa"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!active}
+                />
+                {matches.slice(0, MAX_STUDENT_ROWS).map(st => (
+                  <TouchableOpacity
+                    key={st.nmec}
+                    style={styles.pickRow}
+                    onPress={() => setStudentNmec(String(st.nmec))}
+                    disabled={active}
+                  >
+                    <Text style={styles.pickTitle}>{st.name ?? st.email}</Text>
+                    <Text style={styles.pickDetails}>
+                      NMEC {st.nmec}
+                      {st.device_id != null ? ` · assigned to device ${st.device_id}` : ''}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                {matches.length > MAX_STUDENT_ROWS ? (
+                  <Text style={styles.infoText}>
+                    {matches.length - MAX_STUDENT_ROWS} more; type to narrow the list.
+                  </Text>
+                ) : null}
+                {matches.length === 0 ? (
+                  <Text style={styles.infoText}>No allowed student matches.</Text>
+                ) : null}
+              </>
+            );
+          })()
+        ) : (
+          <TextInput
+            style={styles.input}
+            value={studentNmec}
+            onChangeText={setStudentNmec}
+            placeholder="Student NMEC, e.g. 123123"
+            placeholderTextColor="#aaa"
+            keyboardType="numeric"
+            editable={!active}
+          />
+        )}
       </View>
 
       <View style={[styles.statusBox, active ? styles.statusOn : styles.statusOff]}>
@@ -732,6 +990,29 @@ const styles = StyleSheet.create({
   },
   btnDisabled: {
     opacity: 0.5,
+  },
+  pickRow: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#cec5b5',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#fffdf8',
+  },
+  pickRowSelected: {
+    borderColor: '#668f52',
+    borderWidth: 2,
+  },
+  pickTitle: {
+    color: BRAND_CHARCOAL,
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  pickDetails: {
+    color: BRAND_TAUPE,
+    fontSize: 12,
+    marginTop: 2,
   },
   statusBox: {
     width: '100%',

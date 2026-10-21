@@ -155,9 +155,16 @@ claim listener.
 Nothing is needed on the Pi: it accepts the tap, and the server's
 confirmation decides whether the session is applied.
 
-1. Check the student's card. In the app, fill **Course ID**, **Exam ID**,
-   **Session ID**, **Device ID** and **Student NMEC**, then tap **Generate
-   Secret & Activate**. The app generates a secret in native code and
+1. Under **Session**, pick the session from the list of open sessions
+   (course · exam · session, with room and date). This fills the course,
+   exam and session IDs; **Change Session** goes back to the list, and
+   **Enter IDs Manually** is the fallback.
+2. Check the student's card. Under **Seat**, type the **Device ID** from the
+   device's label and pick the student: search the session's allowed
+   students by name, NMEC or email (each row shows the device the student is
+   already assigned to, if any). For a session without an allowed-students
+   list, type the NMEC instead. Then tap **Generate Secret & Activate**.
+   The app generates a secret in native code and
    registers it, with the NMEC, via
    `POST /course/{c}/{e}/{s}/device/{d}/provisioning-secret` (valid 5
    minutes). Only that student can then join the session on this device
@@ -166,11 +173,13 @@ confirmation decides whether the session is applied.
    student is taking an exam on that device (joined, not finished, session
    not ended), the server refuses a registration for another student or
    session with HTTP 409 "Device in use".
-2. Tap the phone against the Pi's reader. The Pi decrypts the payload,
+3. Tap the phone against the Pi's reader. The Pi decrypts the payload,
    confirms it with the server, saves it to `/etc/pie/session.json` and
    updates `apiBaseUrl` in `/etc/pie/device.json`.
-3. Tap **Deactivate Secure Provisioning** when done. This also deletes the
-   registered secret on the server (best effort) if it wasn't used.
+4. Tap **Deactivate Secure Provisioning** when done. This also deletes the
+   registered secret on the server (best effort) if it wasn't used, and
+   clears the device and student for the next seat; the session stays
+   selected.
 
 ## Android NFC files
 
