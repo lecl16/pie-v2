@@ -1,0 +1,4 @@
+#!/bin/sh
+set -e
+# The USB link is configured by systemd-networkd (10-usb0.network).
+systemctl enable systemd-networkd.service

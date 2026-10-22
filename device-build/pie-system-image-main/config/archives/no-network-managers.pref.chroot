@@ -1,0 +1,7 @@
+# The exam host's only network is the USB link to the PIE device
+# (/etc/systemd/network/10-usb0.network). Nothing that could bring up the
+# laptop's own interfaces is installed, including through recommends
+# (task-xfce-desktop recommends network-manager-gnome).
+Package: network-manager network-manager-gnome wpasupplicant wireless-tools iw modemmanager connman isc-dhcp-client dhcpcd-base ifupdown
+Pin: release *
+Pin-Priority: -1
