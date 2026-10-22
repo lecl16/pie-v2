@@ -7,7 +7,6 @@ import org.json.JSONObject
 class ExamHceService : HostApduService() {
 
     companion object {
-        var examDataJson: String = ""
         var isActive: Boolean = false
         var secureProvisioningEnabled: Boolean = false
         // {"sessionId", "nmec", "apiBaseUrl", "ttlSec"} — see App.tsx.
@@ -30,7 +29,6 @@ class ExamHceService : HostApduService() {
         private const val SW1_MORE_DATA = 0x61
 
         private const val INS_SELECT_AID = 0xA4
-        private const val INS_GET_EXAM_DATA = 0xCA
         private const val INS_SET_READER_CHALLENGE = 0xCB
         private const val INS_GET_PROVISION_TOKEN = 0xCC
         private const val INS_GET_DEVICE_IDENTITY = 0xCD
@@ -53,7 +51,6 @@ class ExamHceService : HostApduService() {
 
         return when (commandApdu[1].toInt() and 0xFF) {
             INS_SELECT_AID -> handleSelectAid(commandApdu)
-            INS_GET_EXAM_DATA -> handleGetExamData()
             INS_SET_READER_CHALLENGE -> handleSetReaderChallenge(commandApdu)
             INS_GET_PROVISION_TOKEN -> handleGetProvisionToken()
             INS_GET_DEVICE_IDENTITY -> handleGetDeviceIdentity()
@@ -66,29 +63,6 @@ class ExamHceService : HostApduService() {
         if (!matchesAid(commandApdu)) return SW_FILE_NOT_FOUND
         aidSelected = true
         return SW_SUCCESS
-    }
-
-    private fun handleGetExamData(): ByteArray {
-        if (!aidSelected) return SW_CONDITIONS_NOT_SATISFIED
-
-        if (secureProvisioningEnabled) {
-            return SW_CONDITIONS_NOT_SATISFIED
-        }
-
-        if (examDataJson.isBlank()) return SW_CONDITIONS_NOT_SATISFIED
-
-        val parsed = try {
-            JSONObject(examDataJson)
-        } catch (_: Exception) {
-            return SW_FILE_NOT_FOUND
-        }
-
-        val response = JSONObject()
-            .put("sessionId", parsed.optString("sessionId", ""))
-            .put("nmec", parsed.optString("nmec", ""))
-            .put("timestamp", parsed.optString("timestamp", ""))
-
-        return respondWithJson(response)
     }
 
     private fun handleSetReaderChallenge(commandApdu: ByteArray): ByteArray {
@@ -176,12 +150,6 @@ class ExamHceService : HostApduService() {
         if (lc == 0) return ByteArray(0)
         if (commandApdu.size < 5 + lc) return null
         return commandApdu.copyOfRange(5, 5 + lc)
-    }
-
-    private fun respondWithJson(json: JSONObject): ByteArray {
-        val body = json.toString().toByteArray(Charsets.UTF_8)
-        if (body.size > MAX_RESPONSE_BODY_BYTES) return SW_FILE_NOT_FOUND
-        return body + SW_SUCCESS
     }
 
     private fun respondEncrypted(readerKey: ByteArray, ins: Int, json: JSONObject): ByteArray {

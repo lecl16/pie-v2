@@ -7,22 +7,14 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 
 /**
- * React Native NativeModule that stores the plain exam payload used by HCE.
+ * React Native NativeModule that holds what the HCE service delivers in a
+ * tap: a session provisioning payload or a new device identity, both sent
+ * encrypted to the reader (ExamHceService.kt).
  */
 class NfcHceModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
     override fun getName(): String = "NfcHceModule"
-
-    @ReactMethod
-    fun setExamData(jsonString: String) {
-        ExamHceService.examDataJson = jsonString
-        ExamHceService.secureProvisioningEnabled = false
-        ExamHceService.securePayloadJson = ""
-        ExamHceService.sharedSecretB64u = ""
-        ExamHceService.pendingDeviceIdentityJson = ""
-        ExamHceService.isActive = true
-    }
 
     /**
      * A fresh 32-byte session secret, base64url — generated here rather than
@@ -45,7 +37,6 @@ class NfcHceModule(reactContext: ReactApplicationContext) :
         ExamHceService.secureProvisioningEnabled = true
         ExamHceService.securePayloadJson = payloadJson
         ExamHceService.sharedSecretB64u = sharedSecretBase64Url
-        ExamHceService.examDataJson = ""
         ExamHceService.pendingDeviceIdentityJson = ""
         ExamHceService.isActive = true
     }
@@ -59,7 +50,6 @@ class NfcHceModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun setPendingDeviceIdentity(identityJson: String) {
         ExamHceService.pendingDeviceIdentityJson = identityJson
-        ExamHceService.examDataJson = ""
         ExamHceService.secureProvisioningEnabled = false
         ExamHceService.securePayloadJson = ""
         ExamHceService.sharedSecretB64u = ""
@@ -74,8 +64,7 @@ class NfcHceModule(reactContext: ReactApplicationContext) :
     }
 
     @ReactMethod
-    fun clearExamData() {
-        ExamHceService.examDataJson = ""
+    fun clearProvisioning() {
         ExamHceService.secureProvisioningEnabled = false
         ExamHceService.securePayloadJson = ""
         ExamHceService.sharedSecretB64u = ""

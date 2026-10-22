@@ -89,7 +89,7 @@ function sessionDetails(s: ProvisioningSession): string {
 interface NativeHceModule {
   generateSecret?: () => Promise<string>;
   setSecureProvisioning?: (payloadJson: string, sharedSecretBase64Url: string) => void;
-  clearExamData?: () => void;
+  clearProvisioning?: () => void;
   setPendingDeviceIdentity?: (identityJson: string) => void;
   clearPendingDeviceIdentity?: () => void;
 }
@@ -497,7 +497,7 @@ function AppContent(): React.JSX.Element {
   ]);
 
   const deactivate = useCallback(() => {
-    nfcHceModule?.clearExamData?.();
+    nfcHceModule?.clearProvisioning?.();
     setActive(false);
     setStatus('Secure provisioning deactivated.');
 
