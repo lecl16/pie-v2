@@ -1,0 +1,5 @@
+# user-setup would let live-config create its default "user" account
+# (password "live", passwordless sudo) at every boot.
+Package: user-setup
+Pin: release *
+Pin-Priority: -1

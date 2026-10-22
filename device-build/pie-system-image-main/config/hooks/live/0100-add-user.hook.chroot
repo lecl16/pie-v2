@@ -1,8 +1,6 @@
 set -e
+# The only account on the exam image; lightdm logs it in automatically
+# (/etc/lightdm/lightdm.conf). There is no administrator account: root is
+# locked and no user is in the sudo group.
 useradd -m -s /bin/bash student
 echo "student:pie" | chpasswd
-
-
-useradd -m -G sudo,adm -s /bin/bash admin
-echo "admin:admin" | chpasswd
-

@@ -10,7 +10,7 @@ LB_BINARY_FILESYSTEM="fat32"
 LB_APT_INDICES="true"
 
 # Set boot parameters
-LB_BOOTAPPEND_LIVE="boot=live components locales=en_US.UTF-8 keyboard-layouts=pt --language en"
+LB_BOOTAPPEND_LIVE="boot=live components live-config.noroot locales=en_US.UTF-8 keyboard-layouts=pt --language en"
 
 # Set boot parameters
 LB_BOOTAPPEND_INSTALL=""
