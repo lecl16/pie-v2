@@ -2,6 +2,9 @@
 Description=PIE NFC provisioning reader
 After=nfc-venv-init.service
 Requires=nfc-venv-init.service
+# Keep restarting however often it fails (e.g. the PN532 missing after a
+# power glitch), so the reader comes back by itself once the chip answers.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -14,8 +17,6 @@ ExecStart=/opt/nfc-reader/venv/bin/python /opt/nfc-reader/reader_script.py
 WorkingDirectory=/opt/nfc-reader
 Restart=always
 RestartSec=5
-StartLimitInterval=200
-StartLimitBurst=5
 
 [Install]
 WantedBy=multi-user.target
