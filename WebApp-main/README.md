@@ -1,6 +1,6 @@
-# PIE - WebApp
+# PIE — WebApp
 
-## Web dashboard for the Portable Isolated Environment system
+Web dashboard for the Portable Isolated Environment system.
 
 WebApp is the browser-based dashboard for the **Portable Isolated Environment
 (PIE)** exam system. It is a [Next.js](https://nextjs.org) (App Router)
@@ -9,9 +9,7 @@ and to monitor students in real time (screen-share and activity logs) during an
 exam. All data is served by [`pie-api-main`](../pie-api-main), the system's
 backend API.
 
-The actual application lives in [`webapp/`](webapp); this file documents the
-project as a whole, while [`webapp/README.md`](webapp/README.md) keeps the
-default `create-next-app` quick-start notes.
+The application lives in [`webapp/`](webapp); all commands below run there.
 
 ## Architecture
 
@@ -32,10 +30,36 @@ and analytics are all fetched from/written to the API described in
 
 ## Getting started
 
-### Requirements
+### In production
 
-- Node.js 18+ and npm (or yarn/pnpm/bun)
-- A running instance of [`pie-api-main`](../pie-api-main) (see its README)
+The dashboard runs as the `webapp` service of the API's Docker Compose
+stack (`pie-api-main/docker-compose.yml`, built from `webapp/Dockerfile`).
+The API's Caddy serves it over HTTPS on port 3000, with the deployment's
+certificate. Teachers open:
+
+```
+https://<server>:3000
+```
+
+There is nothing to run here: `docker compose up -d --build` in
+`pie-api-main` builds and starts it with the rest. Its settings come from
+`pie-api-main/.env`:
+
+- **`PIE_API_URL`** (for example `https://192.168.1.50:8000`): the API's
+  address as the teachers' browsers reach it. `scripts/setup.sh` fills it
+  with the machine's main address. It is compiled into the build, so after
+  changing it, run `docker compose up -d --build` again.
+- **The CA:** the browsers trust the deployment's CA (`ca.crt`, installed
+  once). The dashboard's own server trusts it through the mounted
+  `certs/ca.crt`.
+
+The steps below are for development.
+
+### Requirements (development)
+
+- Node.js 18.18 or later, and npm
+- A running [`pie-api-main`](../pie-api-main), and its CA certificate
+  (`pie-api-main/certs/ca.crt`)
 
 ### Setup
 
@@ -44,11 +68,16 @@ cd webapp
 npm install
 ```
 
-Configure the API endpoint in `webapp/.env`:
+Configure the API's address in `webapp/.env`. Use the address the
+teachers' browsers will reach the server at (not `localhost`, unless the
+dashboard is only used on the server machine itself):
 
 ```bash
-NEXT_PUBLIC_API_URL=https://localhost:8000
+NEXT_PUBLIC_API_URL=https://192.168.1.50:8000
 ```
+
+`NEXT_PUBLIC_*` variables are compiled into the build: rebuild after changing
+it.
 
 The API serves HTTPS only, with a certificate signed by its deployment's own CA
 (`pie-api-main/certs/ca.crt`, see `pie-api-main/README.md`). Two things must trust it:
@@ -64,11 +93,12 @@ The API serves HTTPS only, with a certificate signed by its deployment's own CA
 ### Run in development
 
 ```bash
-npm run dev
+npm run dev              # hot reload, http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) — it redirects to
-`/en/login` by default (see `next.config.mjs`).
+While the compose stack is running, its Caddy holds port 3000: use another
+port for development, `npm run dev -- -p 3001`. The dev server sets no
+`Secure` flag on the login cookie, so plain HTTP works there.
 
 ### Other scripts
 
@@ -83,15 +113,16 @@ Open [http://localhost:3000](http://localhost:3000) — it redirects to
 
 | Variable | Description |
 |---|---|
-| `NEXT_PUBLIC_API_URL` | Base URL of the PIE-API instance this dashboard talks to (client- and server-side requests) |
+| `NEXT_PUBLIC_API_URL` | Base URL of the PIE-API (`https://<server>:8000`), used by both the browser and the Node server. Compiled in at build time. In production, set from `PIE_API_URL` in `pie-api-main/.env` |
+| `NODE_EXTRA_CA_CERTS` | The CA the Node server trusts for the API. `/certs/ca.crt` in the container; defaults to `../../pie-api-main/certs/ca.crt` in `npm run dev` and `npm run start` |
 
 ## Authentication
 
 Login (`POST /users/login` on the API) returns a JWT, which the client stores in
 a `currentUser` cookie (`src/lib/auth.js`) alongside the user's profile. On every
 navigation, `AuthProvider` (`src/components/auth-provider.js`) checks the cookie
-and token expiry and redirects unauthenticated users to `/{locale}/login`;
-`login`, `register` and `forgot-password` are the only public paths. A timer
+and token expiry and redirects unauthenticated users to `/{locale}/login`,
+the only public page. A timer
 refreshes the token shortly before it expires and clears the session if refresh
 fails. Route-level access levels (admin / teacher / student) are enforced by the
 API itself — see [`pie-api-main`](../pie-api-main)'s authentication section.
@@ -121,7 +152,7 @@ student hierarchy exposed by the API:
 | `/course/[course_id]/create_exam` | Create an exam |
 | `/course/[course_id]/[exam_id]` | Exam detail / session listing |
 | `/course/[course_id]/[exam_id]/edit_exam` | Edit an exam |
-| `/course/[course_id]/[exam_id]/create_session` | Create a session |
+| `/course/[course_id]/[exam_id]/create_session` | Create a session: date, room, duration, allowed links, allowed students |
 | `/course/[course_id]/[exam_id]/[session_id]` | Session detail: join code, roster, submissions |
 | `/course/[course_id]/[exam_id]/[session_id]/edit_session` | Edit a session |
 | `/course/[course_id]/[exam_id]/[session_id]/[user_nmec]` | Live monitoring of one student: screen-share, log stream, and time-extension controls |
@@ -155,7 +186,28 @@ The admin analytics dashboard (`components/analytics/*`) queries the API's
 `/analytics` endpoints to render log-volume charts, time series, and a
 drill-down course/exam log hierarchy.
 
+## Sessions: allowed links and students
+
+- **Allowed links.** The exam app writes them to the exam OS's proxy
+  whitelist when the student joins. An entry allows everything under it
+  (`https://www.example.com/` allows the whole site); an entry with a query
+  string allows only that page. New sessions start with
+  `https://idp.ua.pt` (UA's login) and `https://elearning.ua.pt`
+  (`DEFAULT_ALLOWED_LINKS` in `src/lib/utils.js`). The second one opens
+  **all of elearning** during the exam; remove it and use the quiz's own link
+  to limit the student to the quiz.
+- **Allowed students** are matched by **email**. When the list is set, the
+  examiner app only offers those students, and the API refuses anyone else.
+  A student whose account email isn't on the list can't be assigned to a
+  device.
+
 ## Known limitations
 
+- **Production needs HTTPS.** Production builds mark the login cookie
+  `Secure`, which browsers only keep on an `https://` page. Serve the
+  dashboard through the compose stack's Caddy, as above, not with a bare
+  `npm run start` over HTTP.
+- There is no user-management page: create accounts as described in
+  `pie-api-main/docs/deployment.md`.
 - The `/auditor` route is a placeholder page with no implemented functionality
   yet.

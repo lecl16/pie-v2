@@ -1,9 +1,9 @@
-# ExaminerApp
+# PIE — Examiner App
 
-React Native (Android-only) app the examiner uses to provision exam devices
-over NFC. The phone emulates an NFC card via Host Card Emulation (HCE); the
-device side is a Raspberry Pi running `../reader_script.py` against a PN532
-module over I2C.
+React Native app (Android only) that the examiner uses to register PIE
+devices and provision them for an exam session over NFC. The phone emulates
+an NFC card with Host Card Emulation (HCE); the PIE device's PN532 reader
+talks to it (`../reader_script.py`, see [`../README.md`](../README.md)).
 
 The app is the **trusted node** of the provisioning scheme: it logs in to
 `pie-api-main` as a teacher, creates the secrets and identities, gives them
@@ -36,6 +36,10 @@ device):
 | `CC` | `GET_PROVISION_TOKEN` | Phone returns the encrypted session payload |
 | `CD` | `GET_DEVICE_IDENTITY` | Phone returns the encrypted device identity (claim tap) |
 | `C0` | `GET RESPONSE` | Fetches the rest of a response longer than 240 bytes (ISO 7816-4 `61xx` chaining) |
+
+Any other instruction, including commands of earlier protocol versions such
+as the unencrypted `GET_EXAM_DATA` (`CA`), is answered with `6D00` (wrong
+instruction).
 
 Both `CC` and `CD` answer with an ECDH P-256 + HKDF-SHA256 + AES-256-GCM
 envelope encrypted to the reader's per-tap key (`NfcCrypto.kt` /
@@ -78,48 +82,47 @@ trusts user-installed CAs besides the system ones, so the deployment's own
 CA is accepted. The debug build (`src/debug/res/xml/`) also allows plain
 HTTP to `localhost`, `127.0.0.1` and `10.0.2.2`, for the Metro bundler.
 
-## Run the app
-
-1. Install dependencies:
+## Build and install
 
 ```bash
 npm install
 ```
 
-2. Start Metro only if you want the debug build with Fast Refresh:
-
-```bash
-npm start
-```
-
-3. Build/install a standalone Android release on the device:
+**Release build** (what examiners use). With the phone connected over USB
+debugging, this builds, installs and launches it:
 
 ```bash
 npm run android
 ```
 
-   This requires a connected device/emulator (it builds, installs, and
-   launches). To just produce the `.apk` without one:
-
-   ```bash
-   cd android && ./gradlew assembleRelease
-   ```
-
-   Output: `android/app/build/outputs/apk/release/app-release.apk` (use
-   `assembleDebug` for a debug build instead, output under `.../apk/debug/`).
-
-4. If you want to run the debug build instead, use this command and keep
-   Metro reachable from the device:
+To only produce the APK, for installing by other means:
 
 ```bash
+cd android && ./gradlew assembleRelease
+# android/app/build/outputs/apk/release/app-release.apk
+```
+
+See [Release signing](#release-signing) before distributing it.
+
+**Debug build** (development, with Fast Refresh). Keep Metro running and
+reachable from the phone:
+
+```bash
+npm start                         # Metro, in its own terminal
+adb reverse tcp:8081 tcp:8081
 npm run android:dev
 ```
 
-5. Keep Metro reachable from device when using the debug build:
+## Release signing
 
-```bash
-adb reverse tcp:8081 tcp:8081
-```
+`android/app/build.gradle` signs the **release** build with the debug
+keystore (`android/app/debug.keystore`, the React Native template's
+default). That is enough to install the APK by hand, but anyone can sign an
+APK with the same public key. Before distributing the app, create your own
+keystore and point `signingConfigs.release` at it, kept out of the
+repository (see <https://reactnative.dev/docs/signed-apk-android>). An app
+signed with a different key can't be installed over the old one: uninstall
+it first, then log in again; the phone re-enrolls with a new key.
 
 ## Use the app
 
@@ -180,6 +183,19 @@ confirmation decides whether the session is applied.
    registered secret on the server (best effort) if it wasn't used, and
    clears the device and student for the next seat; the session stays
    selected.
+
+## Troubleshooting
+
+| What the app shows | Cause | What to do |
+|---|---|---|
+| Login fails with a network or certificate error | The phone doesn't trust the deployment's CA, or the address is wrong | Install `ca.crt` (see Requirements); check the address opens `/docs` in Chrome on the phone |
+| `Phone not accepted (HTTP 403): … Phone enrolled by another user` | Another teacher enrolled this phone | Log in as the new teacher and tap **Re-enroll This Phone** |
+| `… Phone certificate revoked` or `… expired` | The phone was revoked, or its certificate expired | **Re-enroll This Phone** |
+| `The server refused this phone's certificate (enrolled with another server?)` | The phone's certificate is from another deployment, or the server's phone CA changed | **Re-enroll This Phone** |
+| `HTTP 409 Device in use: student X is taking session Y` | A student joined on this device and hasn't finished, and that session hasn't ended | End that session in the dashboard (or let the student finish); re-tapping for the same session and student is allowed |
+| `HTTP 400 Student not allowed in session` | The student's email isn't in the session's allowed students | Add it in the dashboard (**Edit Session**) |
+| `HTTP 404 Student not found` | No account with that NMEC, or it isn't a `student` account | Check the account |
+| The tap does nothing | The PIE device's reader isn't running, or its PN532 is stuck | See `device-build/README.md`, "Operations" |
 
 ## Android NFC files
 
