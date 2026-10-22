@@ -5,8 +5,8 @@ set -euo pipefail
 # endpoint, and their systemd units) onto the Pi's OWN Raspberry Pi OS
 # rootfs — NOT pie-system-image-main's amd64 Debian image. The PN532 is
 # wired to this Pi's I2C pins directly; the amd64 image is booted by a
-# *separate* x86 host over the g_multi USB link (see this README's "Pi as
-# USB dongle" section) and has no way to reach that hardware at all, so this
+# *separate* x86 host over the g_multi USB link (see device-build/README.md,
+# "Architecture") and has no way to reach that hardware at all, so this
 # stack has to live here instead of in that image's chroot.
 #
 # Run this the same way as apply-pi-gateway-setup.sh: against the mounted,
@@ -33,6 +33,9 @@ mkdir -p "$ROOTFS/opt/nfc-reader"
 # wired up to auto-sync.
 cp "$NFC_SUPPORT_DIR/reader_script.py" "$ROOTFS/opt/nfc-reader/reader_script.py"
 cp "$NFC_SUPPORT_DIR/device_identity_server.py" "$ROOTFS/opt/nfc-reader/device_identity_server.py"
+# Shared by both: TLS-PSK to the API's device port (needs Python 3.13+,
+# i.e. Raspberry Pi OS Trixie).
+cp "$NFC_SUPPORT_DIR/pie_tls.py" "$ROOTFS/opt/nfc-reader/pie_tls.py"
 
 install -m 755 "$SCRIPT_DIR/init-nfc-venv.sh" "$ROOTFS/usr/local/bin/init-nfc-venv.sh"
 
