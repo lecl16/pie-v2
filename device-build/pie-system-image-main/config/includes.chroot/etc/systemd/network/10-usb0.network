@@ -1,0 +1,12 @@
+# The exam host's only network: the USB link to the PIE device, which
+# forwards to the exam room's network and answers DNS (dnsmasq). usb0 is
+# named by 10-usb0.link. No other interface is configured.
+[Match]
+Name=usb0
+
+[Network]
+Address=192.168.7.1/24
+Gateway=192.168.7.2
+DNS=192.168.7.2
+LinkLocalAddressing=no
+IPv6AcceptRA=no
