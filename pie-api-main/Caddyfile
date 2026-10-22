@@ -41,3 +41,12 @@
 	request_header X-Pie-Phone-Cert-Fingerprint {http.request.tls.client.fingerprint}
 	import api
 }
+
+# The dashboard (the `webapp` service, WebApp-main/webapp), with the same
+# certificate as the API, so teachers' browsers already trust it. Over
+# HTTPS, the login cookie is never sent in clear, and its Secure flag
+# (production builds) lets the browser keep it at all.
+:3000 {
+	tls /certs/server.crt /certs/server.key
+	reverse_proxy webapp:3000
+}

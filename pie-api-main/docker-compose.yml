@@ -52,17 +52,34 @@ services:
       - app_files:/home
     command: ["python", "-m", "app.device_tls_server"]
 
+  # The dashboard (WebApp-main/webapp). No published port: Caddy serves it
+  # over HTTPS on 3000. The API's address is compiled in: PIE_API_URL in
+  # .env, rebuild after changing it.
+  webapp:
+    build:
+      context: ../WebApp-main/webapp
+      args:
+        NEXT_PUBLIC_API_URL: ${PIE_API_URL:-}
+    container_name: pie_webapp
+    restart: unless-stopped
+    expose:
+      - "3000"
+    volumes:
+      - ./certs/ca.crt:/certs/ca.crt:ro
+
   # HTTPS for everyone on 8000; HTTPS with a required phone client
-  # certificate on 8443 (see Caddyfile).
+  # certificate on 8443; the dashboard on 3000 (see Caddyfile).
   caddy:
     image: caddy:2.10
     container_name: pie_caddy
     restart: unless-stopped
     depends_on:
       - app
+      - webapp
     ports:
       - "8000:8000"
       - "8443:8443"
+      - "3000:3000"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./certs:/certs:ro

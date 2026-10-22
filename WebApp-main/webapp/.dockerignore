@@ -1,0 +1,6 @@
+node_modules
+.next
+# The local development settings must not end up in the image: the API's
+# address comes from the build argument.
+.env*
+npm-debug.log*
