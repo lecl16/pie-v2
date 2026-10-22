@@ -1,0 +1,13 @@
+// The exam application (devapp.service, User=student) powers the exam host
+// off when the student closes the finished exam ("Fechar"). It runs as a
+// system service, outside the student's desktop session, so logind's
+// default rule for an active session doesn't cover it, and there is no
+// administrator to authenticate. Powering off is all it is allowed; the
+// student can do the same with the power button.
+polkit.addRule(function (action, subject) {
+    if ((action.id == "org.freedesktop.login1.power-off" ||
+         action.id == "org.freedesktop.login1.power-off-multiple-sessions") &&
+        subject.user == "student") {
+        return polkit.Result.YES;
+    }
+});

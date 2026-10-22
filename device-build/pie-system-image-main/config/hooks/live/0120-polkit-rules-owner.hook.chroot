@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+# live-build copies includes.chroot as root:root, which also takes
+# /etc/polkit-1/rules.d (mode 0700) away from polkitd, so polkitd could no
+# longer read 50-pie-poweroff.rules or any other rule there.
+chown polkitd:root /etc/polkit-1/rules.d
