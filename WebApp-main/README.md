@@ -208,6 +208,6 @@ drill-down course/exam log hierarchy.
   dashboard through the compose stack's Caddy, as above, not with a bare
   `npm run start` over HTTP.
 - There is no user-management page: create accounts as described in
-  `pie-api-main/docs/deployment.md`.
+  `pie-api-main/README.md` ("Accounts").
 - The `/auditor` route is a placeholder page with no implemented functionality
   yet.

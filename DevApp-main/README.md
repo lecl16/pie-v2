@@ -38,7 +38,7 @@ The UI is in Portuguese.
   Trust is limited to the deployment's CA, which the device also relays
   (`SecurityContext(withTrustedRoots: false)`, `Config.api`). Public CAs are
   not trusted, and there is no plain-HTTP fallback.
-  See `pie-api-main/docs/exam-app-tls.md`.
+  See `pie-api-main/README.md`, "How the exam app trusts the server".
 - **Nothing deployment-specific is built in.** The device ID, the server
   address, the CA and the session are fetched at every boot and kept in
   memory only. The exam OS is a live system with no persistence.

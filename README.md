@@ -45,7 +45,7 @@ infrastructure is needed in the exam room beyond a Wi-Fi network.
 1. **Server and dashboard.** Set up `pie-api-main`: `./scripts/setup.sh`,
    then `docker compose up -d --build`, then create the first admin account.
    This also builds and starts the dashboard, at `https://<server>:3000`.
-   See [`pie-api-main/docs/deployment.md`](pie-api-main/docs/deployment.md).
+   See [`pie-api-main/README.md`](pie-api-main/README.md).
 2. **Trust.** Install the deployment's CA certificate
    (`pie-api-main/certs/ca.crt`) on the examiner's phone and in the browser
    used for the dashboard.
@@ -94,5 +94,6 @@ unplugged (see `device-build/README.md`, "Operations").
   is the USB link to the PIE device. Firefox goes through an intercepting
   proxy that allows only the session's links.
 
-Design documents are in [`pie-api-main/docs/`](pie-api-main/docs/). The
-known limitations of each component are listed in its README.
+Each mechanism is described in the API README's
+["How it works"](pie-api-main/README.md#how-it-works) section. The known
+limitations of each component are listed in its README.

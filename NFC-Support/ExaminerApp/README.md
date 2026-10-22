@@ -12,11 +12,11 @@ jobs:
 
 - **Claim a new device** — gives an unclaimed Pi its `deviceId`, device API
   key and the server's `apiBaseUrl`. Once per device. See
-  `../../pie-api-main/docs/device-identity-nfc-bootstrap.md`.
+  `../../pie-api-main/README.md`, "Registering a PIE device".
 - **Provision a session** — gives a claimed Pi a session-scoped secret (plus
   session id, student NMec and the current `apiBaseUrl`), which the Pi then
   confirms with the server before accepting. See
-  `../../pie-api-main/docs/examiner-trusted-node-provisioning.md`.
+  `../../pie-api-main/README.md`, "Session provisioning".
 
 No server address is baked into the app or the exam image: the examiner
 types it into the app, and the taps carry it to the Pi. See `../memo.md` for
@@ -43,8 +43,7 @@ instruction).
 
 Both `CC` and `CD` answer with an ECDH P-256 + HKDF-SHA256 + AES-256-GCM
 envelope encrypted to the reader's per-tap key (`NfcCrypto.kt` /
-`decrypt_envelope()`; layout in section 3 of
-`examiner-trusted-node-provisioning.md`). The INS byte is the AAD, so a
+`decrypt_envelope()` in `../reader_script.py`). The INS byte is the AAD, so a
 claim envelope can't be replayed as a session envelope or vice versa.
 
 Payloads:
@@ -139,7 +138,7 @@ it first, then log in again; the phone re-enrolls with a new key.
    enrolled as phone-N"; until then those actions are disabled. If the
    server rejects the phone (revoked, enrolled by another teacher, or
    enrolled with another server), use **Re-enroll This Phone**. See
-   `../../pie-api-main/docs/examiner-phone-enrollment.md`.
+   `../../pie-api-main/README.md`, "Phone enrollment".
 
 ### Claim a new device (once per Pi)
 
@@ -171,7 +170,7 @@ confirmation decides whether the session is applied.
    registers it, with the NMEC, via
    `POST /course/{c}/{e}/{s}/device/{d}/provisioning-secret` (valid 5
    minutes). Only that student can then join the session on this device
-   (`../../pie-api-main/docs/tap-gated-student-join.md`); to fix a wrong
+   (`../../pie-api-main/README.md`, "Joining a session"); to fix a wrong
    NMEC, register and tap again before the student joins. While a
    student is taking an exam on that device (joined, not finished, session
    not ended), the server refuses a registration for another student or

@@ -21,7 +21,7 @@ for the full setup of a device. They need **Python 3.13 or later**
    the reader waits for a registration tap from the Examiner App ("Provision
    New Device"). The tap carries the device ID, the device API key and the
    server's address. The reader saves them and restarts into the normal
-   loop. See `pie-api-main/docs/device-identity-nfc-bootstrap.md`.
+   loop. See `pie-api-main/README.md`, "Registering a PIE device".
 2. **CA.** `device_identity_server.py` fetches the deployment's CA from the
    server over TLS-PSK and caches it in `/etc/pie/server-ca.json`. It
    refetches every hour, and whenever the server's address changes.
@@ -32,7 +32,7 @@ for the full setup of a device. They need **Python 3.13 or later**
    (`POST /device/{d}/provisioning-secret/{s}/confirm`, port 8444). Only
    then does it save the session in `/etc/pie/session.json`. Nothing needs
    to be done on the device itself. See
-   `pie-api-main/docs/examiner-trusted-node-provisioning.md`.
+   `pie-api-main/README.md`, "Session provisioning".
 4. **Exam laptop.** The exam app polls this device over the USB link:
    - `GET /device-identity`: device ID, server address and CA. Answers 404
      until the device is registered, and 503 until the CA is available.
