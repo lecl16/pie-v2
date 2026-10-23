@@ -46,13 +46,17 @@ class PhoneCredentialModule(private val reactContext: ReactApplicationContext) :
     fun storeCertificate(certificatePem: String, mtlsPort: Int, promise: Promise) {
         runCatching {
             PhoneCredential.storeCertificate(reactContext, certificatePem, mtlsPort)
+            PhoneTls.reset()
             status()
         }.fold(promise::resolve) { promise.reject("E_PHONE_CREDENTIAL", it) }
     }
 
     @ReactMethod
     fun clear(promise: Promise) {
-        runCatching { PhoneCredential.clear(reactContext) }
+        runCatching {
+            PhoneCredential.clear(reactContext)
+            PhoneTls.reset()
+        }
             .fold({ promise.resolve(null) }) { promise.reject("E_PHONE_CREDENTIAL", it) }
     }
 }

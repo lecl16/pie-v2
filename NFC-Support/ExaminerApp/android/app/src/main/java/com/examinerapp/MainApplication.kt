@@ -7,10 +7,6 @@ import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.modules.network.OkHttpClientProvider
-import java.security.KeyStore
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManagerFactory
-import javax.net.ssl.X509TrustManager
 
 class MainApplication : Application(), ReactApplication {
 
@@ -35,18 +31,14 @@ class MainApplication : Application(), ReactApplication {
    * client certificate (PhoneKeyManager), presented only when a server asks
    * for one — the PIE API's phone port. Server certificates are still checked
    * by the platform's trust manager, i.e. by network_security_config.xml.
+   * See PhoneTls for what happens when the certificate changes.
    */
   private fun useClientCertificateForFetch() {
-    val trustManagers = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
-      .apply { init(null as KeyStore?) }
-      .trustManagers
-    val trustManager = trustManagers.filterIsInstance<X509TrustManager>().first()
-    val sslContext = SSLContext.getInstance("TLS").apply {
-      init(arrayOf(PhoneKeyManager(applicationContext)), trustManagers, null)
-    }
+    PhoneTls.init(applicationContext)
     OkHttpClientProvider.setOkHttpClientFactory {
       OkHttpClientProvider.createClientBuilder(applicationContext)
-        .sslSocketFactory(sslContext.socketFactory, trustManager)
+        .sslSocketFactory(PhoneTls.socketFactory, PhoneTls.trustManager)
+        .connectionPool(PhoneTls.connectionPool)
         .build()
     }
   }
