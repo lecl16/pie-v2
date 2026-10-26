@@ -318,15 +318,19 @@ phone registered.
 
 ### Joining a session
 
-`POST /session-users/create` is accepted only if:
+There is no student login: the examiner checked the student's card before
+the session tap, so the tap already says who sits at the device.
+`POST /session-users/join` (no JWT) is accepted only if:
 - the device was provisioned for that session;
-- the logged-in student is the one the examiner assigned to it (the server
-  takes the student from the JWT, not from the request);
 - the request carries a valid proof from that device: an HMAC over a fresh
   nonce, with a key derived from the session secret. The PIE device gives
   that key to the exam app over the USB link.
 
-A machine that was never tapped can't join, even with valid credentials.
+The server takes the student from the confirmed tap, never from the
+request, and answers with that student's token, which the exam app uses
+for the rest of the exam. A machine that was never tapped can't join. The
+exam app shows the assigned student's name and number before the join, so
+a student can call the examiner if the tap named someone else.
 
 ### Phone enrollment
 

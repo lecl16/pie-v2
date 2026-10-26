@@ -20,7 +20,7 @@ infrastructure is needed in the exam room beyond a Wi-Fi network.
 | [`WebApp-main`](WebApp-main/README.md) | Teacher and admin dashboard (Next.js): courses, exams, sessions, live monitoring, analytics | The server machine (in the same Docker Compose stack), used from a browser |
 | [`NFC-Support/ExaminerApp`](NFC-Support/ExaminerApp/README.md) | Examiner app (React Native, Android): registers devices and provisions them for a session over NFC | The examiner's Android phone |
 | [`NFC-Support`](NFC-Support/README.md) | The PIE device's own services: NFC reader, identity service for the exam host | Each PIE device (Raspberry Pi OS) |
-| [`DevApp-main`](DevApp-main/README.md) | Exam app (Flutter, Linux): student login, the exam, logs, submission | Each laptop, inside the exam OS |
+| [`DevApp-main`](DevApp-main/README.md) | Exam app (Flutter, Linux): joining the session, the exam, logs, submission | Each laptop, inside the exam OS |
 | [`device-build`](device-build/README.md) | Builds the exam OS image, and sets up each PIE device | A build machine (Docker), then each device's SD card |
 
 ```
@@ -67,8 +67,9 @@ infrastructure is needed in the exam room beyond a Wi-Fi network.
 3. At each seat, check the student's card. In the examiner app, pick the
    session and the student, enter the device ID, and tap the phone on the
    device.
-4. The student logs in with their own account and enters the session's join
-   code. Only the assigned student can join on that device.
+4. The student checks that the exam app shows their name and number, and
+   enters the session's join code. There is no student login: only the
+   assigned student can join on that device.
 5. Follow the session from the dashboard. When the student submits, the exam
    app shows "Exame Terminado", and **Fechar** turns the laptop off.
 
