@@ -3,7 +3,7 @@
 Flutter desktop app (Linux) that students use during a PIE exam. It runs
 inside the exam OS, which the laptop boots from its PIE device, as the
 system service `devapp.service` (user `student`). It covers the exam from
-login to submission:
+the examiner's tap to submission:
 
 1. **Waits for the device.** It gets the device's identity, the server's
    address and the deployment's CA from the PIE device over the USB link
@@ -13,10 +13,12 @@ login to submission:
    taps the phone on the device. The app then gets the session, the
    assigned student and a join key (`GET …/session`). Until then it shows
    "A aguardar o examinador".
-3. **Login.** The student logs in with their own account, then enters the
+3. **Join.** There is no login: the app shows the student the examiner
+   assigned to the device (name and number), and the student enters the
    session's join code. The server accepts the join only from this device,
-   for the student the examiner assigned to it. The proof is an HMAC with
-   the join key, sent with the request.
+   and only for that student; the proof is an HMAC with the join key, sent
+   with the request (`POST /session-users/join`). The server answers with
+   the student's token, used for the rest of the exam.
 4. **Exam.**
    - **The exam:** either a file (downloaded, decrypted and unpacked into
      `~/Desktop/Exam`) or a link, opened in Firefox.

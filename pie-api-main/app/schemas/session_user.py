@@ -8,9 +8,10 @@ class SessionUserBase(BaseModel):
     device_id: int
 
 class SessionUserCreate(BaseModel):
-    """The joining student comes from the JWT, not the body; `nonce`/`mac`
-    prove the join comes from the device the examiner tapped for this
-    student — see docs/tap-gated-student-join.md section 5."""
+    """The joining student is the one the examiner assigned to the device in
+    the session tap, not a body field; `nonce`/`mac` prove the join comes
+    from the device the examiner tapped — see docs/tap-gated-student-join.md
+    section 5."""
     join_code: str
     device_id: int
     nonce: str
@@ -27,6 +28,12 @@ class SessionUserOut(SessionUserBase):
     changed_time: int
     allowed_links: Optional[list[str]] = None
     exam: str
+
+class SessionUserJoined(SessionUserOut):
+    """The join response, with the assigned student's name and token."""
+    name: str
+    access_token: str
+    token_type: str
 
 class SessionUserUpdate(SessionUserBase):
     session_id: int

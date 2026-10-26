@@ -157,6 +157,7 @@ class DeviceIdentityHandler(BaseHTTPRequestHandler):
             body = {
                 "sessionId": session_id,
                 "nmec": str(session["nmec"]),
+                "name": str(session.get("name", "")),
                 "joinKey": b64u_encode(key),
             }
         except Exception:

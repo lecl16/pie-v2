@@ -14,6 +14,7 @@ from app.models.db.device import Device
 from app.models.db.device_provisioning_secret import DeviceProvisioningSecret
 from app.models.db.examiner_phone import ExaminerPhone
 from app.models.db.session import Session as ExamSession
+from app.models.db.user import User
 from app.schemas.device import DeviceCreate, DeviceUpdate, DeviceOut, DeviceCreated
 from app.schemas.device_provisioning_secret import (
     DeviceProvisioningSecretConfirm,
@@ -188,11 +189,15 @@ def confirm_provisioning_secret(
     secret_row.claimed_at = datetime.utcnow()
     db.commit()
 
+    student = db.query(User).filter(User.nmec == secret_row.nmec).first() if secret_row.nmec is not None else None
     return DeviceProvisioningSecretConfirmed(
         sessionId=str(session_id),
         # The examiner-assigned student (docs/tap-gated-student-join.md),
         # authoritative over the copy the phone put in the tap.
         nmec=str(secret_row.nmec) if secret_row.nmec is not None else "",
+        # Shown by the exam app, so the student can see the seat is theirs
+        # (there is no student login to catch a wrong assignment).
+        name=student.name if student is not None and student.name else "",
         mac=provisioning_confirm_mac(
             secret_row.secret, CONFIRM_LABEL_SERVER, device_id, session_id, payload.nonce
         ),

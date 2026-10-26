@@ -36,8 +36,8 @@ for the full setup of a device. They need **Python 3.13 or later**
 4. **Exam laptop.** The exam app polls this device over the USB link:
    - `GET /device-identity`: device ID, server address and CA. Answers 404
      until the device is registered, and 503 until the CA is available.
-   - `GET /session`: the provisioned session, the assigned student and the
-     join key. Answers 404 until a session tap.
+   - `GET /session`: the provisioned session, the assigned student (number
+     and name) and the join key. Answers 404 until a session tap.
 5. **End of session.** Every 30 s, the identity service asks the server
    whether the session is still active, and deletes `session.json` once it
    has ended.

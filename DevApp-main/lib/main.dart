@@ -60,9 +60,6 @@ class ExamHomePage extends StatefulWidget {
 }
 
 class _ExamHomePageState extends State<ExamHomePage> {
-  final TextEditingController _usernameController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  bool _passwordVisible = false;
   final TextEditingController _codeController = TextEditingController();
   late final Subscriber _subscriber;
   late final Timer _connectionTimer;
@@ -70,10 +67,7 @@ class _ExamHomePageState extends State<ExamHomePage> {
   bool _connectedToServer = false;
   bool _deviceProvisioned = false;
   bool _sessionProvisioned = false;
-  bool _wrongStudent = false;
-  bool _showIdField = false;
   bool _invalidLogin = false;
-  String email = '';
   int nmec = 0;
   int examID = 0;
   String courseID = '';
@@ -148,78 +142,26 @@ class _ExamHomePageState extends State<ExamHomePage> {
     super.dispose();
   }
 
-  Future<void> _login() async {
-    String inputEmail = _usernameController.text;
-    String inputPassword = _passwordController.text;
-
-    if (inputEmail.isEmpty || inputPassword.isEmpty) {
-      return;
-    }
-
-    try {
-      var response = await Config.api.post(
-        Uri.parse('${Config.apiBaseUrl}/users/login'),
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: jsonEncode({"email": inputEmail, "password": inputPassword}),
-      );
-
-      if (response.statusCode == 200) {
-        var data = jsonDecode(response.body);
-        var token = data['access_token'];
-        // Only for the student's benefit — the server rejects a join by
-        // anyone other than the student the examiner assigned to this
-        // device anyway (pie-api-main/docs/tap-gated-student-join.md).
-        // Checked before anything is stored, so the right student can
-        // still log in once the examiner fixes the assignment.
-        if (data['nmec'].toString() != Config.provisionedNmec) {
-          setState(() {
-            _wrongStudent = true;
-            _invalidLogin = false;
-          });
-          return;
-        }
-        nmec = data['nmec'];
-        Config.addToConfigMap('token', token);
-        Config.addToConfigMap('nmec', nmec);
-        print('Login bem-sucedido: $data');
-        setState(() {
-          _showIdField = true;
-          _invalidLogin = false;
-          _wrongStudent = false;
-        });
-      } else {
-        print('Erro no login: ${response.statusCode} - ${response.body}');
-        setState(() {
-          _invalidLogin = true;
-        });
-      }
-    } catch (e) {
-      _subscriber.issueNotification('Erro ao estabelecer ligação ao servidor. Tente novamente.');
-    }
-
-    email = inputEmail;
-  }
-
   Future<void> _sendId() async {
     String code = _codeController.text;
 
     if (code.isEmpty || !Config.isSessionProvisioned) {
       return;
     }
+    // No student login: the student is the one the examiner assigned to
+    // this device in the session tap, after checking their card. The
+    // server takes it from the confirmed secret and returns their token.
+    nmec = int.parse(Config.provisionedNmec!);
 
     // try {
       final nonce = _b64uEncode(List<int>.generate(16, (_) => Random.secure().nextInt(256)));
       var response = await Config.api.post(
-        Uri.parse('${Config.apiBaseUrl}/session-users/create'),
+        Uri.parse('${Config.apiBaseUrl}/session-users/join'),
         headers: {
           "Content-Type": "application/json",
-          "Authorization": "Bearer ${Config.getFromConfigMap('token')}"
         },
-        // No user_nmec/user_email: the server takes the student from the
-        // JWT. nonce/mac prove this join comes from the device the examiner
-        // tapped for this student.
+        // No credentials: nonce/mac prove this join comes from the device
+        // the examiner tapped for the assigned student.
         body: jsonEncode({
           "join_code": code,
           "device_id": Config.deviceId,
@@ -244,6 +186,8 @@ class _ExamHomePageState extends State<ExamHomePage> {
           _subscriber.issueNotification('Dados inválidos recebidos do servidor. Tente novamente.');
           return;
         }
+        Config.addToConfigMap('token', data['access_token']);
+        Config.addToConfigMap('nmec', nmec);
         int sessionUserID = data['id'];
         sessionID = data['session_id'];
         examID = data['exam_id'];
@@ -465,11 +409,7 @@ class _ExamHomePageState extends State<ExamHomePage> {
 
     // Handle Enter
     if (key == LogicalKeyboardKey.enter) {
-      if (_showIdField) {
-        _sendId();
-      } else {
-        _login();
-      }
+      _sendId();
       return true;
     }
 
@@ -637,80 +577,41 @@ class _ExamHomePageState extends State<ExamHomePage> {
                     _buildPoweroffButton(),
                   ],
                   if (_connectedToServer) ...[
-                    SizedBox(
-                      width: 250,
-                      height: 50,
-                      child: TextFormField(
-                        controller: _usernameController,
-                        decoration: InputDecoration(
-                          labelText: 'E-mail',
-                          prefixIcon: Icon(Icons.person),
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
+                    // The student the examiner assigned in the session tap.
+                    // There is no login, so this is where the student sees
+                    // a wrong assignment.
+                    Text(
+                      Config.provisionedName?.isNotEmpty == true
+                          ? Config.provisionedName!
+                          : 'Estudante',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),
-                    SizedBox(height: 10,),
+                    Text('N.º mecanográfico: ${Config.provisionedNmec ?? ''}'),
+                    SizedBox(height: 8),
+                    Text(
+                      'Se estes não forem os seus dados, chame o examinador.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    SizedBox(height: 20),
                     SizedBox(
                       width: 250,
                       height: 50,
                       child: TextFormField(
-                        controller: _passwordController,
-                        obscureText: !_passwordVisible,
+                        controller: _codeController,
                         decoration: InputDecoration(
+                          labelText: 'Código da Sessão',
+                          prefixIcon: Icon(Icons.perm_identity),
                           border: OutlineInputBorder(),
-                          labelText: 'Password',
-                          prefixIcon: Icon(Icons.lock),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _passwordVisible ? Icons.visibility : Icons.visibility_off,
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _passwordVisible = !_passwordVisible;
-                              });
-                            },
-                          ),
                         ),
                       ),
                     ),
                     SizedBox(height: 20),
                     ElevatedButton(
-                      onPressed: _login,
-                      child: Text('Autenticar'),
+                      onPressed: _sendId,
+                      child: Text('Entrar no exame'),
                     ),
-                    if (_wrongStudent) ...[
-                      SizedBox(height: 20),
-                      Text(
-                        'Este dispositivo foi atribuído a outro estudante. Chame o examinador.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.red),
-                      ),
-                    ],
-                    if (_invalidLogin && !_showIdField) ...[
-                      SizedBox(height: 20),
-                      Text('Credenciais inválidas', style: TextStyle(color: Colors.red)),
-                    ],
-                    if (_showIdField) ...[
-                      SizedBox(height: 20),
-                      SizedBox(
-                        width: 250,
-                        height: 50,
-                        child: TextFormField(
-                          controller: _codeController,
-                          decoration: InputDecoration(
-                            labelText: 'Código da Sessão',
-                            prefixIcon: Icon(Icons.perm_identity),
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                      SizedBox(height: 20),
-                      ElevatedButton(
-                        onPressed: _sendId,
-                        child: Text('Enviar código'),
-                      ),
-                    ],
-                    if (_invalidLogin && _showIdField) ...[
+                    if (_invalidLogin) ...[
                       SizedBox(height: 20),
                       Text('Sessão inválida', style: TextStyle(color: Colors.red)),
                     ],

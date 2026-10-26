@@ -22,4 +22,5 @@ class DeviceProvisioningSecretConfirm(BaseModel):
 class DeviceProvisioningSecretConfirmed(BaseModel):
     sessionId: str
     nmec: str
+    name: str = ""
     mac: str

@@ -31,6 +31,7 @@ class Config {
   // like the fields above.
   int? _provisionedSessionId;
   String? _provisionedNmec;
+  String? _provisionedName;
   String? _joinKey;
   final String _piIdentityUrl;
   final String _examDirectory;
@@ -227,6 +228,8 @@ class Config {
 
   static String? get provisionedNmec => _instance?._provisionedNmec;
 
+  static String? get provisionedName => _instance?._provisionedName;
+
   static String? get joinKey => _instance?._joinKey;
 
   /// Asks the Pi's device_identity_server.py for the session it was
@@ -245,6 +248,7 @@ class Config {
       if (response.statusCode == 404) {
         _instance!._provisionedSessionId = null;
         _instance!._provisionedNmec = null;
+        _instance!._provisionedName = null;
         _instance!._joinKey = null;
         return;
       }
@@ -255,9 +259,11 @@ class Config {
       final sessionId = json['sessionId'];
       final nmec = json['nmec'];
       final joinKey = json['joinKey'];
+      final name = json['name'];
       if (sessionId is int && nmec is String && joinKey is String && joinKey.isNotEmpty) {
         _instance!._provisionedSessionId = sessionId;
         _instance!._provisionedNmec = nmec;
+        _instance!._provisionedName = name is String ? name : null;
         _instance!._joinKey = joinKey;
       }
     } catch (_) {

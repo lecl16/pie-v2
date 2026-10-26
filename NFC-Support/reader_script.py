@@ -300,6 +300,8 @@ def apply_session_provisioning(payload: dict) -> dict:
         # The server's value is authoritative; the phone's copy is only a
         # fallback for an older server that doesn't return it.
         "nmec": str(response.get("nmec") or payload.get("nm", "")),
+        # Shown by the exam app so the student can check the seat is theirs.
+        "name": str(response.get("name") or ""),
         "secret": b64u_encode(secret),
         "provisionedAt": int(time.time()),
     }

@@ -5,7 +5,7 @@ from app.api.routes.course import router as course_router
 from app.api.routes.exam import router as exam_router
 from app.api.routes.user import router as user_router
 from app.api.routes.session import router as session_router
-from app.api.routes.session_user import router as session_user_router
+from app.api.routes.session_user import router as session_user_router, join_router as session_user_join_router
 from app.api.routes.submission import router as submission_router
 from app.api.routes.device import router as device_router
 from app.api.routes.logs import router as logs_router
@@ -72,6 +72,8 @@ app.include_router(pie_router, tags=["pie"], dependencies=[Depends(get_current_u
 app.include_router(course_router, prefix="/course", tags=["course"], dependencies=[Depends(get_teacher_or_admin_user)])
 app.include_router(exam_router, prefix="/course/{course_id}", tags=["exam"], dependencies=[Depends(get_teacher_or_admin_user)])
 app.include_router(session_router, prefix="/course/{course_id}/{exam_id}", tags=["session"], dependencies=[Depends(get_current_user)])
+# The exam app joins without a student login: the device's proof is the credential.
+app.include_router(session_user_join_router, prefix="/session-users", tags=["session-users"])
 app.include_router(session_user_router, prefix="/session-users", tags=["session-users"], dependencies=[Depends(get_current_user)])
 app.include_router(submission_router, prefix="/submission", tags=["submission"], dependencies=[Depends(get_current_user)])
 

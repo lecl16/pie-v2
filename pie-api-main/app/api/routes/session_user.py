@@ -7,8 +7,8 @@ from app.models.db.session_user import SessionUser
 from app.models.db.user import User
 from app.models.db.device_provisioning_secret import DeviceProvisioningSecret
 from app.api.routes.device import join_mac
-from app.core.auth import get_current_user
-from app.schemas.session_user import SessionUserCreate, SessionUserOut, SessionUserUpdate, SessionUserTime
+from app.core.auth import create_access_token
+from app.schemas.session_user import SessionUserCreate, SessionUserJoined, SessionUserOut, SessionUserUpdate, SessionUserTime
 import json
 import base64
 import hmac
@@ -17,6 +17,8 @@ from fastapi.responses import JSONResponse
 import logging
 
 router = APIRouter()
+# Public (no JWT): the exam app joins with the device's proof alone.
+join_router = APIRouter()
 logger = logging.getLogger("uvicorn.error")
 
 def _join_response(db_session_user: SessionUser, session: Session) -> dict:
@@ -33,15 +35,27 @@ def _join_response(db_session_user: SessionUser, session: Session) -> dict:
         "exam": session.exam_link if session.exam_link else "files"
     }
 
-@router.post("/create", response_model=SessionUserOut)
-def create_session_user(
+def _joined(db_session_user: SessionUser, session: Session, student: User) -> dict:
+    """The join response plus the student's token, which the exam app uses
+    for the rest of the exam (download, submissions, logs, pub/sub)."""
+    return {
+        **_join_response(db_session_user, session),
+        "name": student.name,
+        "access_token": create_access_token(data={"sub": student.email}),
+        "token_type": "bearer",
+    }
+
+@join_router.post("/join", response_model=SessionUserJoined)
+def join_session(
     session_user: SessionUserCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ):
-    """Tap-gated join — see docs/tap-gated-student-join.md section 5. Only
-    the student the examiner assigned to this device, joining from the
-    device that confirmed the session secret, gets in."""
+    """Tap-gated join without a student login — see
+    docs/tap-gated-student-join.md section 5. The examiner checked the
+    student's card before the session tap, so the student is the one the
+    examiner assigned to this device, taken from the confirmed secret;
+    the proof shows the request comes from the machine attached to that
+    device. A student password would only prove the same identity again."""
     # Get the session first using the join_code
     session = db.query(Session).filter(Session.join_code == session_user.join_code).first()
     if not session:
@@ -52,21 +66,22 @@ def create_session_user(
     if session.is_ended:
         raise HTTPException(status_code=403, detail="Session has ended")
 
-    # The joining student is whoever is logged in, never a body field.
-    user_nmec = current_user.nmec
-
     secret_row = db.query(DeviceProvisioningSecret).filter(
         DeviceProvisioningSecret.device_id == session_user.device_id,
         DeviceProvisioningSecret.session_id == session.id,
     ).first()
     if secret_row is None or secret_row.claimed_at is None:
         raise HTTPException(status_code=403, detail="Device not provisioned for this session")
-    if secret_row.nmec != user_nmec:
-        raise HTTPException(status_code=403, detail="Device assigned to another student")
+    # The joining student is the one the examiner assigned, never a body field.
+    user_nmec = secret_row.nmec
 
     expected = join_mac(secret_row.secret, session_user.device_id, session.id, user_nmec, session_user.nonce)
     if not hmac.compare_digest(expected, session_user.mac):
         raise HTTPException(status_code=401, detail="Invalid join proof")
+
+    student = db.query(User).filter(User.nmec == user_nmec).first()
+    if student is None or student.role != "student":
+        raise HTTPException(status_code=403, detail="Assigned student not found")
 
     # Rejoin after a reboot or crash of the exam host: same student, same
     # tapped device, attempt not finished — hand back the existing row
@@ -80,7 +95,7 @@ def create_session_user(
             raise HTTPException(status_code=400, detail="User already in session on another device")
         if existing.end_time is not None:
             raise HTTPException(status_code=400, detail="User already finished this session")
-        return _join_response(existing, session)
+        return _joined(existing, session, student)
 
     session_user_data = {
         'session_id': session.id,
@@ -97,7 +112,7 @@ def create_session_user(
             raise HTTPException(status_code=400, detail="User already in session")
         
         # Check if user email is on the allowed_students
-        if session.allowed_students and current_user.email not in session.allowed_students:
+        if session.allowed_students and student.email not in session.allowed_students:
             raise HTTPException(status_code=400, detail="User not allowed in session")
                  
         db.add(db_session_user)
@@ -127,9 +142,7 @@ def create_session_user(
         # else:
         #     exam_link = "files"
         
-        response_data = _join_response(db_session_user, session)
-        logger.error(f"Response: {response_data}")
-        return response_data
+        return _joined(db_session_user, session, student)
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
