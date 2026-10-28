@@ -201,13 +201,11 @@ drill-down course/exam log hierarchy.
   A student whose account email isn't on the list can't be assigned to a
   device.
 
-## Known limitations
+## Notes
 
 - **Production needs HTTPS.** Production builds mark the login cookie
   `Secure`, which browsers only keep on an `https://` page. Serve the
   dashboard through the compose stack's Caddy, as above, not with a bare
   `npm run start` over HTTP.
-- There is no user-management page: create accounts as described in
-  `pie-api-main/README.md` ("Accounts").
-- The `/auditor` route is a placeholder page with no implemented functionality
-  yet.
+- **Accounts** are created as described in `pie-api-main/README.md`
+  ("Accounts").

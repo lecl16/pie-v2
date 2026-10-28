@@ -96,6 +96,18 @@ trusts the proxy's CA, which it fetches at boot (`GET /proxy-ca`).
   the assigned student's is replaced by a "Conta não permitida" page, and
   the proxy logs `Blocked eLearning page for account NMEC …`.
 
+### Privacy
+
+The proxy decrypts the laptop's web traffic, so it sees the student's
+University credentials when they log in to eLearning. It doesn't store
+them: no flow file is written (no `-w`), each flow is discarded once
+handled, and `pie_filter.py` logs only blocked URLs and NMECs, never request
+bodies. mitmdump's own log has one line per request (method, URL,
+status), in the journal; `--set flow_detail=0` in `pie-proxy.service`
+leaves only the filter's lines. The server never sees the credentials: the
+proxy's connections leave through the Wi-Fi, re-encrypted to the real site,
+whose certificate it verifies.
+
 ## Network exposure
 
 `device_identity_server.py` binds `0.0.0.0:8100`, and the proxy `8080`. The
