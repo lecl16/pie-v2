@@ -8,14 +8,10 @@ class SessionUserBase(BaseModel):
     device_id: int
 
 class SessionUserCreate(BaseModel):
-    """The joining student is the one the examiner assigned to the device in
-    the session tap, not a body field; `nonce`/`mac` prove the join comes
-    from the device the examiner tapped — see docs/tap-gated-student-join.md
-    section 5."""
+    """Only the join code: the device is the tunnel the request arrives
+    through, and the student is the one the examiner assigned to it in the
+    session tap (app/core/tunnel.py)."""
     join_code: str
-    device_id: int
-    nonce: str
-    mac: str
 
 class SessionUserOut(SessionUserBase):
     id: int

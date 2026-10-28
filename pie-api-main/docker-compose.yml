@@ -21,6 +21,7 @@ services:
     volumes:
       - .:/app
       - app_files:/home
+      - tunnel_data:/wg
 
     command: ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000",
               "--proxy-headers", "--forwarded-allow-ips", "*"]
@@ -50,6 +51,7 @@ services:
     volumes:
       - .:/app
       - app_files:/home
+      - tunnel_data:/wg
     command: ["python", "-m", "app.device_tls_server"]
 
   # The dashboard (WebApp-main/webapp). No published port: Caddy serves it
@@ -67,8 +69,29 @@ services:
     volumes:
       - ./certs/ca.crt:/certs/ca.crt:ro
 
+  # The exam devices' WireGuard tunnels (app/core/tunnel.py): wg0 on
+  # TUNNEL_SERVER_IP, peers from the shared volume. Caddy shares this
+  # service's network, so it sees the devices' tunnel addresses; that is why
+  # Caddy's ports are published here.
+  wireguard:
+    build: ./wireguard
+    container_name: pie_wireguard
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - TUNNEL_SERVER_IP=${TUNNEL_SERVER_IP:-10.77.0.1}
+    ports:
+      - "${TUNNEL_PORT:-51820}:51820/udp"
+      - "8000:8000"
+      - "8443:8443"
+      - "3000:3000"
+    volumes:
+      - tunnel_data:/wg
+
   # HTTPS for everyone on 8000; HTTPS with a required phone client
-  # certificate on 8443; the dashboard on 3000 (see Caddyfile).
+  # certificate on 8443; the dashboard on 3000; the exam apps, through the
+  # devices' tunnels only, on 8001 (see Caddyfile).
   caddy:
     image: caddy:2.10
     container_name: pie_caddy
@@ -76,10 +99,8 @@ services:
     depends_on:
       - app
       - webapp
-    ports:
-      - "8000:8000"
-      - "8443:8443"
-      - "3000:3000"
+      - wireguard
+    network_mode: "service:wireguard"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./certs:/certs:ro
@@ -163,6 +184,7 @@ services:
 
 volumes:
   caddy_data:
+  tunnel_data:
   mysql_data:
   app_files:
   clamav_data:

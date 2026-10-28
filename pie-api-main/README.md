@@ -18,7 +18,8 @@ API itself.
 
 | Service | Technology | Purpose |
 |---|---|---|
-| `caddy` | Caddy 2 | Terminates TLS on ports 8000 and 8443 (forwards to `app`) and 3000 (forwards to `webapp`) |
+| `caddy` | Caddy 2 | Terminates TLS on ports 8000 and 8443 (forwards to `app`), 3000 (forwards to `webapp`), and 8001 inside the devices' tunnels (forwards to `app`) |
+| `wireguard` | WireGuard (host kernel), `wireguard/` | The PIE devices' tunnels: `wg0` on `10.77.0.1`, UDP 51820. Caddy shares its network, so Caddy's ports are published here |
 | `app` | FastAPI on Python 3.13 (uvicorn) | REST, WebSocket and SSE endpoints; reachable only through Caddy |
 | `device-api` | The same code, `app/device_tls_server.py` | Port 8444: TLS with a per-device pre-shared key, for PIE devices only |
 | `webapp` | Next.js, built from `../WebApp-main/webapp` | The dashboard; reachable only through Caddy, on port 3000 ([WebApp README](../WebApp-main/README.md)) |
@@ -69,6 +70,8 @@ docker compose exec app python -m scripts.create_admin   # first admin, once
 | Swagger UI | `https://<server>:8000/docs` |
 | API, phone port (client certificate required) | `https://<server>:8443` |
 | API, device port (TLS-PSK, PIE devices only) | `<server>:8444` |
+| Devices' tunnels (WireGuard) | `<server>:51820/udp` |
+| API for the exam apps, inside the tunnels only | `https://10.77.0.1:8001` |
 | phpMyAdmin | `http://<server>:8080` |
 | Kibana | `http://<server>:5601` |
 
@@ -81,9 +84,10 @@ Every client reaches the API over TLS:
 | Port | Who | Authentication |
 |---|---|---|
 | `3000` | The dashboard itself (the `webapp` service) | Server certificate only |
-| `8000` | Dashboard, exam app, the examiner app's login and enrollment | Server certificate only |
+| `8000` | Dashboard, the examiner app's login and enrollment | Server certificate only |
+| `8001` | Exam apps, through their PIE device's tunnel only; not published (see [Device tunnels](#device-tunnels)) | Server certificate (valid for `10.77.0.1`); the student's token only works from its device's tunnel address |
 | `8443` | Enrolled examiner phones: device creation, provisioning secrets, the session and student pickers | Server certificate, plus a client certificate signed by the phone CA (see [Phone enrollment](#phone-enrollment)) |
-| `8444` | PIE devices: provisioning confirmation, session status, the CA they relay to the exam app | TLS-PSK with a per-device key, served by `device-api`, not Caddy (see [Device TLS-PSK](#device-tls-psk)) |
+| `8444` | PIE devices: provisioning confirmation, session status, the CA they relay to the exam app, their tunnel key | TLS-PSK with a per-device key, served by `device-api`, not Caddy (see [Device TLS-PSK](#device-tls-psk)) |
 
 `scripts/generate-certs.sh` creates, in `certs/` (never committed):
 
@@ -320,15 +324,19 @@ phone registered.
 
 There is no student login: the examiner checked the student's card before
 the session tap, so the tap already says who sits at the device.
-`POST /session-users/join` (no JWT) is accepted only if:
-- the device was provisioned for that session;
-- the request carries a valid proof from that device: an HMAC over a fresh
-  nonce, with a key derived from the session secret. The PIE device gives
-  that key to the exam app over the USB link.
+`POST /session-users/join` (no JWT, only the join code) is accepted only
+if:
+- it arrives through a PIE device's tunnel, on port 8001: Caddy passes the
+  client's tunnel address, which identifies the device (see
+  [Device tunnels](#device-tunnels));
+- that device was provisioned for that session.
 
 The server takes the student from the confirmed tap, never from the
 request, and answers with that student's token, which the exam app uses
-for the rest of the exam. A machine that was never tapped can't join. The
+for the rest of the exam. The token carries the device's tunnel address,
+and is refused from anywhere else, so a copied token is useless on another
+machine. Nothing secret leaves the device. A machine that was never tapped
+can't join. The
 exam app shows the assigned student's name and number before the join, so
 a student can call the examiner if the tap named someone else.
 
@@ -377,9 +385,32 @@ gets that CA from its PIE device:
 A rogue tap can't make the exam app trust another CA: that server would
 first have to complete the PSK handshake with the device.
 
+### Device tunnels
+
+Each PIE device has a WireGuard tunnel to the server (`wireguard` service,
+`app/core/tunnel.py`):
+
+- **Keys:** the device creates its own key pair; the private key never
+  leaves it. It registers the public key over port 8444
+  (`POST /device/{d}/tunnel`) and gets its tunnel address, `10.77.0.0/16`
+  plus its id + 1, and the server's key. The server's private key is created
+  on the `wireguard` service's first start, in the `tunnel_data` volume.
+- **Split tunnel:** only traffic to the server's tunnel address
+  (`10.77.0.1`) goes through it. The allowed sites leave through the exam
+  room's Wi-Fi, as before.
+- **The exam app** reaches the API at `https://10.77.0.1:8001`, through
+  the device, with TLS inside the tunnel (the server certificate includes
+  `10.77.0.1`).
+- **The peers** are rewritten from the database by the API
+  (`tunnel_data/peers.conf`) whenever a device registers a key, is deleted,
+  or has its API key rotated; the `wireguard` service applies them within
+  seconds. Devices can't reach each other through the server.
+- **Firewall:** open **UDP 51820** on the server. A network that blocks UDP
+  blocks the tunnels, and no exam app can reach the server.
+
 ## Production notes
 
-- **Published ports.** Besides 3000, 8000, 8443 and 8444, the compose file
+- **Published ports.** Besides 3000, 8000, 8443, 8444 and 51820/udp, the compose file
   publishes MySQL (3306), Redis (6379), Elasticsearch (9200), Kibana (5601),
   ClamAV (3310) and phpMyAdmin (8080) on the host. Redis and Elasticsearch
   have no authentication. On any network you don't fully control, block

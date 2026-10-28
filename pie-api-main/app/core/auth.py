@@ -15,6 +15,7 @@ from app.schemas.user import UserOut
 from app.core.config import config
 from app.core.security import hash_device_key
 from app.core.phone_certs import normalize_fingerprint
+from app.core.tunnel import TUNNEL_IP_HEADER
 
 # Change these settings in production
 SECRET_KEY = config.SECRET_KEY
@@ -40,7 +41,11 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
+def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid authentication credentials",
@@ -51,6 +56,13 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
         if email is None:
+            raise credentials_exception
+        # A student's token from a join is bound to the tunnel address of
+        # the device it joined through (app/core/tunnel.py): it is refused
+        # from anywhere else, so a copied token is of no use on another
+        # machine.
+        tunnel_ip = payload.get("tip")
+        if tunnel_ip is not None and request.headers.get(TUNNEL_IP_HEADER) != tunnel_ip:
             raise credentials_exception
         token_data = TokenData(email=email)
     except (JWTError, AttributeError):

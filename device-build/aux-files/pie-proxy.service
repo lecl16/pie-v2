@@ -1,0 +1,23 @@
+[Unit]
+Description=PIE filtering proxy for the USB-attached exam host
+After=network.target nfc-venv-init.service
+Wants=nfc-venv-init.service
+
+[Service]
+Type=simple
+# The exam host's web traffic is redirected here by nftables (transparent
+# mode), so the allowlist and the eLearning account check
+# (NFC-Support/pie_filter.py) apply whatever system the laptop boots. Its
+# own user: it parses traffic from an untrusted host. Its CA is created in
+# the confdir on first start and served to the exam OS by
+# device_identity_server.py (GET /proxy-ca). mitmproxy is installed from
+# PyPI on the first boot (init-nfc-venv.sh); Trixie has no package for it.
+User=pie-proxy
+Group=pie-proxy
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/pie-proxy/venv/bin/mitmdump --mode transparent --listen-port 8080 --set confdir=/var/lib/pie-proxy -s /opt/nfc-reader/pie_filter.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

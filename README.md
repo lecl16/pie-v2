@@ -89,11 +89,13 @@ unplugged (see `device-build/README.md`, "Operations").
   - device to server: TLS with a per-device pre-shared key;
   - exam app to server: trusts only the deployment's CA, which the device
     relays.
-- **Join.** The server accepts a join only from the device the examiner
-  tapped for that student, proven by a key derived from the session secret.
-- **Exam host.** The exam OS has no administrator account. Its only network
-  is the USB link to the PIE device. Firefox goes through an intercepting
-  proxy that allows only the session's links.
+- **Join.** The exam app reaches the server only through the PIE device's
+  WireGuard tunnel; the server accepts a join only through the tunnel of a
+  device the examiner tapped, for the student assigned to it.
+- **Exam host.** The exam OS has no administrator account and no filtering
+  rules. Its only network is the USB link to the PIE device, which lets its
+  web traffic through a filtering proxy: only the session's links, and on
+  eLearning only the assigned student's account (checked by NMEC).
 
 Each mechanism is described in the API README's
 ["How it works"](pie-api-main/README.md#how-it-works) section. The known

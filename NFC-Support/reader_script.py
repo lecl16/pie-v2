@@ -5,7 +5,9 @@ import json
 import os
 import secrets
 import ssl
+import subprocess
 import time
+import uuid
 import urllib.error
 import urllib.request
 from hashlib import sha256
@@ -83,6 +85,15 @@ DEVICE_CONFIG_FILE = Path("/etc/pie/device.json")
 # (see confirm_with_server()).
 SESSION_STATE_FILE = Path("/etc/pie/session.json")
 
+# The exam room's network, delivered in the taps ("w": {t, s, p}) and kept
+# in the NetworkManager profile that apply-pi-gateway-setup.sh first wrote.
+# WPA2-Personal only.
+WIFI_CONNECTION_ID = "ExamWiFi"
+WIFI_CONNECTION_FILE = Path("/etc/NetworkManager/system-connections/ExamWiFi.nmconnection")
+WIFI_CONNECT_TIMEOUT_SECONDS = 30
+# Must match apply-pi-gateway-setup.sh.
+WIFI_AUTOCONNECT_PRIORITY = 100
+
 HTTP_TIMEOUT_SECONDS = 10
 
 
@@ -148,9 +159,13 @@ def load_device_config() -> dict:
 def write_json_atomic(path: Path, content: dict):
     """Write-then-rename, so a crash mid-write never leaves a half-written
     file behind. 0600: every file written this way holds a secret."""
+    write_text_atomic(path, json.dumps(content, indent=2) + "\n")
+
+
+def write_text_atomic(path: Path, content: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(".tmp")
-    tmp_path.write_text(json.dumps(content, indent=2) + "\n", encoding="utf-8")
+    tmp_path.write_text(content, encoding="utf-8")
     os.chmod(tmp_path, 0o600)
     tmp_path.replace(path)
 
@@ -231,6 +246,102 @@ def decrypt_envelope(
     return parse_json_body("encrypted envelope", plaintext)
 
 
+def parse_wifi(wifi) -> tuple[str, str] | None:
+    """The network in a tap, or None if the tap carries none (the device
+    keeps its current one)."""
+    if not wifi:
+        return None
+    if not isinstance(wifi, dict) or wifi.get("t") != "psk":
+        raise RuntimeError("Unsupported Wi-Fi type (WPA2-Personal only)")
+    ssid = str(wifi.get("s", ""))
+    psk = str(wifi.get("p", ""))
+    if not ssid or len(ssid.encode("utf-8")) > 32:
+        raise RuntimeError("Invalid Wi-Fi name")
+    # WPA2 passphrase: 8 to 63 printable ASCII characters.
+    if not 8 <= len(psk) <= 63 or not all(32 <= ord(c) <= 126 for c in psk):
+        raise RuntimeError("Invalid Wi-Fi password")
+    return ssid, psk
+
+
+def wifi_profile(ssid: str, psk: str, profile_uuid: str) -> str:
+    """NetworkManager keyfile. The SSID is written as a list of bytes and the
+    passphrase with GKeyFile escapes, so no value can add lines or keys."""
+    ssid_bytes = "".join(f"{b};" for b in ssid.encode("utf-8"))
+    psk_escaped = psk.replace("\\", "\\\\").replace(" ", "\\s")
+    return (
+        "[connection]\n"
+        f"id={WIFI_CONNECTION_ID}\n"
+        f"uuid={profile_uuid}\n"
+        "type=wifi\n"
+        "interface-name=wlan0\n"
+        "autoconnect=true\n"
+        # Above any other Wi-Fi profile on the card (e.g. Raspberry Pi
+        # Imager's "preconfigured"), so the Pi always prefers the exam's.
+        f"autoconnect-priority={WIFI_AUTOCONNECT_PRIORITY}\n"
+        "\n"
+        "[wifi]\n"
+        "mode=infrastructure\n"
+        f"ssid={ssid_bytes}\n"
+        "\n"
+        "[wifi-security]\n"
+        "key-mgmt=wpa-psk\n"
+        f"psk={psk_escaped}\n"
+        "\n"
+        "[ipv4]\n"
+        "method=auto\n"
+        "\n"
+        "[ipv6]\n"
+        "addr-gen-mode=default\n"
+        "method=auto\n"
+    )
+
+
+def activate_wifi_profile(content: str):
+    """Writes the profile (0600, it holds the passphrase) and brings it up,
+    waiting until the device has an address on the new network."""
+    write_text_atomic(WIFI_CONNECTION_FILE, content)
+    subprocess.run(["nmcli", "connection", "reload"], check=True, timeout=15, capture_output=True)
+    subprocess.run(
+        ["nmcli", "--wait", str(WIFI_CONNECT_TIMEOUT_SECONDS), "connection", "up", "id", WIFI_CONNECTION_ID],
+        check=True,
+        timeout=WIFI_CONNECT_TIMEOUT_SECONDS + 10,
+        capture_output=True,
+    )
+
+
+def switch_wifi(wifi: tuple[str, str]) -> str | None:
+    """Moves the device to the tap's network. Returns the previous profile,
+    so the caller can go back to it, or None if nothing changed."""
+    previous = WIFI_CONNECTION_FILE.read_text(encoding="utf-8") if WIFI_CONNECTION_FILE.exists() else ""
+    profile_uuid = next(
+        (line.split("=", 1)[1].strip() for line in previous.splitlines() if line.startswith("uuid=")),
+        str(uuid.uuid4()),
+    )
+    content = wifi_profile(*wifi, profile_uuid)
+    if content == previous:
+        return None
+    print(f"Joining Wi-Fi network {wifi[0]!r}...")
+    try:
+        activate_wifi_profile(content)
+    except Exception as exc:
+        restore_wifi(previous)
+        raise RuntimeError(f"Could not join Wi-Fi network {wifi[0]!r}") from exc
+    return previous
+
+
+def restore_wifi(previous: str):
+    """Best effort: back to the network the device was on before the tap."""
+    try:
+        if previous:
+            activate_wifi_profile(previous)
+        else:
+            WIFI_CONNECTION_FILE.unlink(missing_ok=True)
+            subprocess.run(["nmcli", "connection", "reload"], check=False, timeout=15, capture_output=True)
+        print("Restored the previous Wi-Fi network.")
+    except Exception as exc:
+        print(f"Could not restore the previous Wi-Fi network: {exc}")
+
+
 def confirm_proof(secret: bytes, label: str, device_id: int, session_id: int, nonce_b64u: str) -> str:
     message = f"{label}|{device_id}|{session_id}|{nonce_b64u}".encode("utf-8")
     return b64u_encode(hmac.new(secret, message, sha256).digest())
@@ -281,15 +392,25 @@ def apply_session_provisioning(payload: dict) -> dict:
     if len(secret) < 32:
         raise RuntimeError("Session secret too short")
     api_base_url = str(payload["u"]).rstrip("/")
+    wifi = parse_wifi(payload.get("w"))
 
     device_config = load_device_config()
-    response = confirm_with_server(
-        api_base_url,
-        int(device_config["deviceId"]),
-        str(device_config["deviceApiKey"]),
-        session_id,
-        secret,
-    )
+    # The device joins the tap's network to reach the server, but keeps it
+    # only if the server confirms the secret: anyone can send a tap, and an
+    # unconfirmed one must not move the device to another network.
+    previous_wifi = switch_wifi(wifi) if wifi else None
+    try:
+        response = confirm_with_server(
+            api_base_url,
+            int(device_config["deviceId"]),
+            str(device_config["deviceApiKey"]),
+            session_id,
+            secret,
+        )
+    except Exception:
+        if previous_wifi is not None:
+            restore_wifi(previous_wifi)
+        raise
 
     if device_config["apiBaseUrl"] != api_base_url:
         device_config["apiBaseUrl"] = api_base_url
@@ -422,8 +543,17 @@ def on_connect_claim(tag):
             if not identity.get(key):
                 raise RuntimeError(f"Malformed identity payload: missing {key}")
 
+        wifi = parse_wifi(identity.get("w"))
         claim_identity(identity)
         print(f"Device claimed: id={identity['deviceId']}")
+        # Registration is trust on first use, so the network is taken as is.
+        # A failure keeps the device registered on its previous network; the
+        # next session tap can bring the right one.
+        if wifi:
+            try:
+                switch_wifi(wifi)
+            except Exception as exc:
+                print(f"Error: {exc}")
         return True
     except Exception as exc:
         print(f"Error: {exc}")

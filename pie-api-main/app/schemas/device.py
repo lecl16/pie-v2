@@ -18,6 +18,19 @@ class DeviceCreated(DeviceOut):
     api_key: str
 
 
+class DeviceTunnelRegister(BaseModel):
+    """The device's WireGuard public key (base64, 32 bytes)."""
+    publicKey: str
+
+class DeviceTunnel(BaseModel):
+    """What the device needs for its tunnel (app/core/tunnel.py)."""
+    address: str
+    serverAddress: str
+    serverPublicKey: str
+    endpointPort: int
+    # The API inside the tunnel, which the device gives the exam app.
+    apiUrl: str
+
 class DeviceUpdate(DeviceBase):
     pass
 

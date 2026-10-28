@@ -165,3 +165,56 @@ secret, binds the token to this specific challenge/tap, and rejects
 replay) rather than payload confidentiality — appropriate since the NFC
 channel itself is the trusted physical proximity check, not something
 that needs protecting from eavesdroppers the way a network channel would.
+
+## 2026-09-06
+
+Real hardware testing on the Pi surfaced two problems with the PN532/I2C
+setup, both now fixed:
+
+- `device-build/aux-files/config.txt` had `dtoverlay=pn532-i2c`, which binds
+  the chip to the kernel's own NFC subsystem driver at boot. That's a
+  different consumer of the I2C address than `reader_script.py` needs, and
+  it silently prevented userspace access — same class of conflict as the
+  classic RTC/`ds1307` overlay-vs-`i2c-dev` problem. Removed the overlay
+  (`dtparam=i2c_arm=on` alone is enough); README's Notes section corrected
+  to match.
+- Even with that fixed, `nfc.ContactlessFrontend("i2c:/dev/i2c-1")` still
+  raised `ENODEV` — turns out `nfcpy` has no I2C transport at all. Confirmed
+  straight from its source (`nfc/clf/transport.py` only defines `TTY`/`USB`
+  classes; `nfc/clf/pn532.py`'s `init()` hard-rejects anything that isn't
+  `TYPE == "TTY"`). The `"i2c:..."` connstring was never going to work,
+  independent of the overlay issue above.
+- Since the I2C wiring is fixed (non-negotiable for this deployment),
+  swapped `nfcpy` out for `adafruit-circuitpython-pn532`, which has a real
+  I2C driver. Added a small `Type4TagSession` shim in `reader_script.py`
+  that drives the PN532's `InListPassiveTarget`/`InDataExchange` commands
+  directly and exposes the same `.transceive(apdu)` interface the existing
+  `on_connect()`/`send_and_parse()` challenge-response logic already
+  expected from an `nfcpy` tag object — so none of the HMAC/window/replay
+  logic changed, only the transport underneath it.
+
+End-to-end tap test against `ExamHceService.kt` succeeded after that (all
+three APDUs returned SW=9000, token MAC verified) — the one live failure
+along the way was a stale shared secret from testing in an older script
+location, not a protocol bug; both sides' JSON canonicalization checked out
+byte-for-byte on review.
+
+Baked all of this into `device-build` so a fresh image has a working NFC
+reader out of the box (closes the "Add python dependencies to the ISO
+build" / "Upload the NFC reader script into the ISO" TODOs in
+`device-build/README.md` — see its Notes section for the full breakdown):
+- `reader_script.py` copied into the image at `/opt/nfc-reader/`.
+- `liblgpio` (native lib `adafruit-blinka`'s GPIO backend needs) built from
+  source at image-build time — no apt package for it on this Debian base.
+- The actual `adafruit-circuitpython-pn532`/`adafruit-blinka` venv is
+  deliberately deferred to **first boot** (`nfc-venv-init.service`) rather
+  than built at image time, since Blinka's install-time board detection
+  needs to run on the real Pi, not the build chroot.
+- `nfc-reader.service` runs the reader loop as root at boot (needs raw
+  `/dev/i2c-1`); `--arm` is still a manual one-off command post-boot.
+- Flagged a persistence caveat for later: the generated
+  `provision_secret.txt` only survives reboots because this image's rootfs
+  is currently a real ext4 partition, not a live-boot overlay — the planned
+  read-only-overlay hardening (see README's "Overlayfs" note) would need to
+  carve out `/opt/nfc-reader/` as a persistent bind mount, or every reboot
+  silently invalidates whatever secret is pasted into the Examiner App.

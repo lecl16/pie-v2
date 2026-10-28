@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math';
 
-import 'package:crypto/crypto.dart';
 
 import 'package:window_manager/window_manager.dart';
 import 'package:flutter/material.dart';
@@ -154,19 +152,17 @@ class _ExamHomePageState extends State<ExamHomePage> {
     nmec = int.parse(Config.provisionedNmec!);
 
     // try {
-      final nonce = _b64uEncode(List<int>.generate(16, (_) => Random.secure().nextInt(256)));
       var response = await Config.api.post(
         Uri.parse('${Config.apiBaseUrl}/session-users/join'),
         headers: {
           "Content-Type": "application/json",
         },
-        // No credentials: nonce/mac prove this join comes from the device
-        // the examiner tapped for the assigned student.
+        // Only the join code: the request reaches the server through the
+        // Pi's tunnel (Config.apiBaseUrl is the server's tunnel address),
+        // which is how the server knows the device, and from it the
+        // student the examiner assigned.
         body: jsonEncode({
           "join_code": code,
-          "device_id": Config.deviceId,
-          "nonce": nonce,
-          "mac": _joinMac(nonce),
         }),
       );
 
@@ -239,17 +235,6 @@ class _ExamHomePageState extends State<ExamHomePage> {
     //   _subscriber.issueNotification('Erro ao estabelecer ligação ao servidor. Tente novamente.');
     //   print('Erro ao enviar ID: $e');
     // }
-  }
-
-  static String _b64uEncode(List<int> bytes) =>
-      base64Url.encode(bytes).replaceAll('=', '');
-
-  /// Must match join_mac() in pie-api-main/app/api/routes/device.py.
-  String _joinMac(String nonce) {
-    final key = base64Url.decode(base64Url.normalize(Config.joinKey!));
-    final message =
-        'pie-join-v1|${Config.deviceId}|${Config.provisionedSessionId}|$nmec|$nonce';
-    return _b64uEncode(Hmac(sha256, key).convert(utf8.encode(message)).bytes);
   }
 
   void _showNotifications() {

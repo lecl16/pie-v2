@@ -1,0 +1,14 @@
+[Unit]
+Description=Install the exam device's CA for Firefox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Not oneshot: it waits for the device, and must not hold up the boot.
+# Firefox only starts when an exam does, by which time the device answers.
+Type=simple
+ExecStart=/usr/local/bin/pie-device-ca.sh
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

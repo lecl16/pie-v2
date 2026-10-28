@@ -1,12 +1,33 @@
-from mitmproxy import http
-from urllib.parse import urlsplit, urljoin
-import os
-import sys
+"""The exam device's filtering proxy (mitmproxy add-on, pie-proxy.service).
 
-# Written by DevApp-main when the student joins: the exam link (if the exam
-# is a link) and the session's allowed links, comma-separated.
-WHITELIST_FILE = "/etc/iptables/whitelist.txt"
-print(f"Using whitelist file at: {WHITELIST_FILE}")
+The exam host's web traffic is redirected here by the Pi's nftables rules
+(transparent mode), so the filtering applies whatever system the laptop
+boots, and the exam OS carries no rules of its own. The exam OS only trusts
+this proxy's CA, which device_identity_server.py serves it.
+
+Two jobs:
+- the allowlist: pages that match the session's allowed links, and the
+  files those pages load;
+- the eLearning account: every eLearning page shows the logged-in user as
+  "Name NMEC"; a page for an account other than the student the examiner
+  assigned to this device is blocked.
+
+Both come from FILTER_FILE, which device_identity_server.py writes from the
+server's answer about the provisioned session.
+"""
+
+import html
+import json
+import os
+import re
+import sys
+from urllib.parse import urljoin, urlsplit
+
+from mitmproxy import http
+
+# {"allowedLinks": [...], "nmec": "..."}; absent while the device has no
+# session, and then only the University's login pages are allowed.
+FILTER_FILE = "/etc/pie/filter.json"
 
 # Hosts always allowed: UA's login (SSO) and its static files.
 WHITELIST_HOSTS = {
@@ -14,9 +35,11 @@ WHITELIST_HOSTS = {
     "static.ua.pt",
 }
 
-# The elearning login flow, always allowed.
+# The elearning login flow, always allowed. Moodle sends the student to
+# Shibboleth's Login handler, which redirects to idp.ua.pt; the IdP posts
+# the answer back to SAML2/POST. The whole handler path covers both.
 MANUAL_WHITELIST_URLS = {
-    "https://elearning.ua.pt/Shibboleth.sso/SAML2/POST",
+    "https://elearning.ua.pt/Shibboleth.sso/",
     "https://elearning.ua.pt/login/index.php",
     "https://elearning.ua.pt/auth/shibboleth/index.php",
 }
@@ -28,6 +51,15 @@ MANUAL_WHITELIST_URLS = {
 #   page only, so one quiz link doesn't open the other quizzes.
 ALLOWED_ENTRIES = set()
 
+# The NMEC of the student assigned to this device, or None without a session.
+EXPECTED_NMEC = None
+
+# Pages whose user menu is checked against EXPECTED_NMEC.
+ELEARNING_HOSTS = {"elearning.ua.pt"}
+# Moodle's user menu: <span class="usertext me-1">Name NMEC</span>.
+USERTEXT = re.compile(r'<span class="usertext[^"]*">\s*([^<]*?)\s*</span>')
+TRAILING_NUMBER = re.compile(r"(\d+)\s*$")
+
 # Origins of the pages the student was allowed to open. Files those pages
 # load (images, scripts, styles, fonts, XHR) are allowed from any host; the
 # pages themselves (navigations) must match an entry.
@@ -38,7 +70,7 @@ allowed_page_origins = set()
 # Referer is that stylesheet) are allowed too. Pages on these hosts are not.
 allowed_file_origins = set()
 
-_whitelist_stat = None
+_filter_stat = ()  # never equal to a real stat, so the first call loads
 
 
 def normalize(url, default_scheme="https"):
@@ -97,36 +129,55 @@ def is_allowed_url(url, http_upgrade=False):
     return False
 
 
-def reload_whitelist():
-    """Re-reads the file whenever it changes, so links written when the
-    student joins apply to the very next request."""
-    global _whitelist_stat, ALLOWED_ENTRIES
+def reload_filter():
+    """Re-reads the file whenever it changes, so a session provisioned or
+    ended applies to the very next request."""
+    global _filter_stat, ALLOWED_ENTRIES, EXPECTED_NMEC
     try:
-        stat = os.stat(WHITELIST_FILE)
+        stat = os.stat(FILTER_FILE)
         current = (stat.st_mtime_ns, stat.st_size)
     except OSError:
         current = None
-    if current == _whitelist_stat:
+    if current == _filter_stat:
         return
-    _whitelist_stat = current
+    _filter_stat = current
 
     entries = {normalize(url) for url in MANUAL_WHITELIST_URLS}
+    nmec = None
     if current is not None:
         try:
-            with open(WHITELIST_FILE, "r") as f:
-                content = f.read()
-            for url in content.replace("\n", ",").split(","):
-                normalized = normalize(url)
+            with open(FILTER_FILE, "r", encoding="utf-8") as f:
+                content = json.load(f)
+            for url in content.get("allowedLinks") or []:
+                normalized = normalize(str(url))
                 if normalized:
                     entries.add(normalized)
-                elif url.strip():
-                    print(f"Ignoring unusable whitelist entry: {url.strip()!r}")
+                elif str(url).strip():
+                    print(f"Ignoring unusable allowlist entry: {str(url).strip()!r}")
+            nmec = str(content.get("nmec") or "").strip() or None
         except Exception as e:
-            print(f"Error reloading whitelist: {e}", file=sys.stderr)
-    else:
-        print(f"WARNING: Whitelist file not found at {WHITELIST_FILE}")
+            print(f"Error reloading the filter: {e}", file=sys.stderr)
     ALLOWED_ENTRIES = entries
-    print(f"Whitelist now contains {len(ALLOWED_ENTRIES)} entries: {sorted(ALLOWED_ENTRIES)}")
+    EXPECTED_NMEC = nmec
+    print(f"Filter: {len(ALLOWED_ENTRIES)} entries, assigned NMEC {EXPECTED_NMEC or '(none)'}")
+
+
+def account_nmec(page_html):
+    """The NMEC in an eLearning page's user menu, or None if the page shows
+    no logged-in user."""
+    match = USERTEXT.search(page_html)
+    if not match:
+        return None
+    number = TRAILING_NUMBER.search(html.unescape(match.group(1)))
+    return number.group(1) if number else ""
+
+
+BLOCKED_ACCOUNT_PAGE = """<!doctype html><html lang="pt"><head><meta charset="utf-8">
+<title>Conta não permitida</title></head><body style="font-family:sans-serif;margin:3em">
+<h1>Conta não permitida</h1>
+<p>Esta conta do eLearning não corresponde ao estudante atribuído a este dispositivo.</p>
+<p>Termine a sessão no eLearning e chame o examinador.</p>
+</body></html>"""
 
 
 def is_navigation(flow):
@@ -142,7 +193,7 @@ def request(flow: http.HTTPFlow) -> None:
     Allow pages that match the whitelist, and the files those pages load.
     Block everything else.
     """
-    reload_whitelist()
+    reload_filter()
 
     url = flow.request.pretty_url
 
@@ -162,6 +213,8 @@ def request(flow: http.HTTPFlow) -> None:
             allowed_file_origins.add(origin_of(url))
             return
 
+    if is_navigation(flow):
+        print(f"Blocked page: {url}")
     flow.response = http.Response.make(
         403,  # Forbidden
         b"Access to url blocked by PIE.",
@@ -171,15 +224,20 @@ def request(flow: http.HTTPFlow) -> None:
 
 def response(flow: http.HTTPFlow) -> None:
     """
-    Block a page redirecting to one that isn't allowed. (The redirected
-    request would be blocked anyway; this gives the clearer message.)
+    Block a page redirecting to one that isn't allowed (the redirected
+    request would be blocked anyway; this gives the clearer message), and
+    an eLearning page logged in as someone other than the assigned student.
     """
+    check_elearning_account(flow)
     if flow.response.status_code in [301, 302, 303, 307, 308] and is_navigation(flow):
         location = flow.response.headers.get("Location")
         if location:
-            full_redirect_url = urljoin(flow.request.url, location)
+            # pretty_url, not url: in transparent mode the request's host is
+            # the server's IP, and a relative Location would resolve to it.
+            full_redirect_url = urljoin(flow.request.pretty_url, location)
 
             if not is_allowed_url(full_redirect_url, http_upgrade=True):
+                print(f"Blocked redirect: {flow.request.pretty_url} -> {full_redirect_url}")
                 flow.response = http.Response.make(
                     403,
                     b"Access denied: Redirect to unauthorized URL.",
@@ -187,4 +245,21 @@ def response(flow: http.HTTPFlow) -> None:
                 )
                 return
 
-reload_whitelist()
+reload_filter()
+
+
+def check_elearning_account(flow: http.HTTPFlow) -> None:
+    host = (flow.request.pretty_host or "").lower()
+    if host not in ELEARNING_HOSTS or EXPECTED_NMEC is None:
+        return
+    if not flow.response or "text/html" not in flow.response.headers.get("Content-Type", ""):
+        return
+    nmec = account_nmec(flow.response.get_text(strict=False) or "")
+    if nmec is None or nmec == EXPECTED_NMEC:
+        return
+    print(f"Blocked eLearning page for account NMEC {nmec or '?'} (assigned: {EXPECTED_NMEC})")
+    flow.response = http.Response.make(
+        403,
+        BLOCKED_ACCOUNT_PAGE.encode("utf-8"),
+        {"Content-Type": "text/html; charset=utf-8"},
+    )

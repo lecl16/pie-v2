@@ -36,6 +36,8 @@ cp "$NFC_SUPPORT_DIR/device_identity_server.py" "$ROOTFS/opt/nfc-reader/device_i
 # Shared by both: TLS-PSK to the API's device port (needs Python 3.13+,
 # i.e. Raspberry Pi OS Trixie).
 cp "$NFC_SUPPORT_DIR/pie_tls.py" "$ROOTFS/opt/nfc-reader/pie_tls.py"
+# The filtering proxy's add-on (pie-proxy.service).
+cp "$NFC_SUPPORT_DIR/pie_filter.py" "$ROOTFS/opt/nfc-reader/pie_filter.py"
 
 install -m 755 "$SCRIPT_DIR/init-nfc-venv.sh" "$ROOTFS/usr/local/bin/init-nfc-venv.sh"
 
@@ -43,6 +45,7 @@ mkdir -p "$ROOTFS/etc/systemd/system"
 cp "$SCRIPT_DIR/nfc-venv-init.service" "$ROOTFS/etc/systemd/system/nfc-venv-init.service"
 cp "$SCRIPT_DIR/nfc-reader.service" "$ROOTFS/etc/systemd/system/nfc-reader.service"
 cp "$SCRIPT_DIR/pie-device-identity.service" "$ROOTFS/etc/systemd/system/pie-device-identity.service"
+cp "$SCRIPT_DIR/pie-proxy.service" "$ROOTFS/etc/systemd/system/pie-proxy.service"
 
 mount --bind /proc "$ROOTFS/proc"
 mount --bind /sys "$ROOTFS/sys"
@@ -51,7 +54,10 @@ mount --bind /dev/pts "$ROOTFS/dev/pts"
 
 chroot "$ROOTFS" apt update
 chroot "$ROOTFS" apt install -y i2c-tools python3-venv python3-pip python3-dev build-essential swig wget
-chroot "$ROOTFS" systemctl enable nfc-venv-init.service nfc-reader.service pie-device-identity.service
+# The filtering proxy's own user; its CA lives in its home.
+chroot "$ROOTFS" id -u pie-proxy >/dev/null 2>&1 || \
+  chroot "$ROOTFS" useradd --system --home-dir /var/lib/pie-proxy --create-home --shell /usr/sbin/nologin pie-proxy
+chroot "$ROOTFS" systemctl enable nfc-venv-init.service nfc-reader.service pie-device-identity.service pie-proxy.service
 
 umount "$ROOTFS/dev/pts" "$ROOTFS/dev" "$ROOTFS/sys" "$ROOTFS/proc"
 

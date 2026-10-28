@@ -14,6 +14,18 @@ MARKER=/var/lib/nfc-reader/.venv-ready
 
 mkdir -p /var/lib/nfc-reader
 
+# The filtering proxy (pie-proxy.service). Debian Trixie has no mitmproxy
+# package, so it goes in its own virtualenv from PyPI, kept apart from the
+# reader's because mitmproxy pins its own versions of shared packages
+# (cryptography). Checked separately from the marker, so devices set up
+# before the proxy existed get it too.
+PROXY_VENV_DIR=/opt/pie-proxy/venv
+if [ ! -x "$PROXY_VENV_DIR/bin/mitmdump" ]; then
+    python3 -m venv "$PROXY_VENV_DIR"
+    "$PROXY_VENV_DIR/bin/pip" install --upgrade pip
+    "$PROXY_VENV_DIR/bin/pip" install mitmproxy
+fi
+
 if [ -f "$MARKER" ]; then
     exit 0
 fi

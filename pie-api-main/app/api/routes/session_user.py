@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List
 from app.core.database import get_db
@@ -6,12 +6,11 @@ from app.models.db.session import Session
 from app.models.db.session_user import SessionUser
 from app.models.db.user import User
 from app.models.db.device_provisioning_secret import DeviceProvisioningSecret
-from app.api.routes.device import join_mac
 from app.core.auth import create_access_token
+from app.core.tunnel import TUNNEL_IP_HEADER, device_id_for_tunnel_ip
 from app.schemas.session_user import SessionUserCreate, SessionUserJoined, SessionUserOut, SessionUserUpdate, SessionUserTime
 import json
 import base64
-import hmac
 from app.core.security import get_key_from_storage, verify_hmac
 from fastapi.responses import JSONResponse
 import logging
@@ -35,27 +34,34 @@ def _join_response(db_session_user: SessionUser, session: Session) -> dict:
         "exam": session.exam_link if session.exam_link else "files"
     }
 
-def _joined(db_session_user: SessionUser, session: Session, student: User) -> dict:
+def _joined(db_session_user: SessionUser, session: Session, student: User, tunnel_ip: str) -> dict:
     """The join response plus the student's token, which the exam app uses
-    for the rest of the exam (download, submissions, logs, pub/sub)."""
+    for the rest of the exam (download, submissions, logs, pub/sub). The
+    token only works from this device's tunnel address (get_current_user)."""
     return {
         **_join_response(db_session_user, session),
         "name": student.name,
-        "access_token": create_access_token(data={"sub": student.email}),
+        "access_token": create_access_token(data={"sub": student.email, "tip": tunnel_ip}),
         "token_type": "bearer",
     }
 
 @join_router.post("/join", response_model=SessionUserJoined)
 def join_session(
     session_user: SessionUserCreate,
+    request: Request,
     db: Session = Depends(get_db),
 ):
-    """Tap-gated join without a student login — see
-    docs/tap-gated-student-join.md section 5. The examiner checked the
-    student's card before the session tap, so the student is the one the
-    examiner assigned to this device, taken from the confirmed secret;
-    the proof shows the request comes from the machine attached to that
-    device. A student password would only prove the same identity again."""
+    """Tap-gated join without a student login. The request must arrive
+    through a device's tunnel (app/core/tunnel.py), which identifies the
+    device; the examiner checked the student's card before the session tap,
+    so the student is the one assigned to that device, taken from the
+    confirmed secret. Nothing in the request proves either: the device's
+    secrets never leave it."""
+    tunnel_ip = request.headers.get(TUNNEL_IP_HEADER)
+    device_id = device_id_for_tunnel_ip(tunnel_ip)
+    if device_id is None:
+        raise HTTPException(status_code=403, detail="Join only through a PIE device")
+
     # Get the session first using the join_code
     session = db.query(Session).filter(Session.join_code == session_user.join_code).first()
     if not session:
@@ -67,17 +73,13 @@ def join_session(
         raise HTTPException(status_code=403, detail="Session has ended")
 
     secret_row = db.query(DeviceProvisioningSecret).filter(
-        DeviceProvisioningSecret.device_id == session_user.device_id,
+        DeviceProvisioningSecret.device_id == device_id,
         DeviceProvisioningSecret.session_id == session.id,
     ).first()
     if secret_row is None or secret_row.claimed_at is None:
         raise HTTPException(status_code=403, detail="Device not provisioned for this session")
     # The joining student is the one the examiner assigned, never a body field.
     user_nmec = secret_row.nmec
-
-    expected = join_mac(secret_row.secret, session_user.device_id, session.id, user_nmec, session_user.nonce)
-    if not hmac.compare_digest(expected, session_user.mac):
-        raise HTTPException(status_code=401, detail="Invalid join proof")
 
     student = db.query(User).filter(User.nmec == user_nmec).first()
     if student is None or student.role != "student":
@@ -91,16 +93,16 @@ def join_session(
         SessionUser.user_nmec == user_nmec,
     ).first()
     if existing is not None:
-        if existing.device_id != session_user.device_id:
+        if existing.device_id != device_id:
             raise HTTPException(status_code=400, detail="User already in session on another device")
         if existing.end_time is not None:
             raise HTTPException(status_code=400, detail="User already finished this session")
-        return _joined(existing, session, student)
+        return _joined(existing, session, student, tunnel_ip)
 
     session_user_data = {
         'session_id': session.id,
         'user_nmec': user_nmec,
-        'device_id': session_user.device_id,
+        'device_id': device_id,
     }
 
     db_session_user = SessionUser(**session_user_data)
@@ -142,7 +144,7 @@ def join_session(
         # else:
         #     exam_link = "files"
         
-        return _joined(db_session_user, session, student)
+        return _joined(db_session_user, session, student, tunnel_ip)
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))

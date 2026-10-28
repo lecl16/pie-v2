@@ -48,11 +48,14 @@ claim envelope can't be replayed as a session envelope or vice versa.
 
 Payloads:
 
-- **Claim** (`CD`): `{deviceId, apiKey, apiBaseUrl}`. Single-use on the
+- **Claim** (`CD`): `{deviceId, apiKey, apiBaseUrl, w?}`. Single-use on the
   phone — cleared as soon as it's served, whether or not the reader accepts
   it.
-- **Session** (`CC`): `{v: 2, sid, nm, k, u, exp}` — session id, NMec, the
-  base64url session secret, `apiBaseUrl`, and an expiry 60 s after the tap.
+- **Session** (`CC`): `{v: 2, sid, nm, k, u, exp, w?}` — session id, NMec,
+  the base64url session secret, `apiBaseUrl`, and an expiry 60 s after the
+  tap.
+- `w`, in both, is the exam room's Wi-Fi when one is set in the app:
+  `{t: "psk", s: SSID, p: password}` (WPA2-Personal only).
 
 After a session tap the Pi calls
 `POST /device/{deviceId}/provisioning-secret/{sessionId}/confirm` with an
@@ -139,6 +142,14 @@ it first, then log in again; the phone re-enrolls with a new key.
    server rejects the phone (revoked, enrolled by another teacher, or
    enrolled with another server), use **Re-enroll This Phone**. See
    `../../pie-api-main/README.md`, "Phone enrollment".
+
+### Exam room Wi-Fi
+
+Under **Exam Room Wi-Fi**, enter the network's name (SSID) and password.
+While set, every tap carries it, and the Pi joins that network before it
+contacts the server. Leave it empty to keep the Pi's current network. Only
+WPA2-Personal networks (a password) are supported. It's kept in memory
+only, like the server URL.
 
 ### Claim a new device (once per Pi)
 

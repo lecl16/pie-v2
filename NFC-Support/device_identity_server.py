@@ -25,12 +25,19 @@ port, so it comes from the server that holds this device's key — see
 pie-api-main/docs/exam-app-tls.md. Until it has one for the current
 `apiBaseUrl`, `/device-identity` answers 503 and DevApp-main keeps waiting.
 
-It also serves `GET /session` (pie-api-main/docs/tap-gated-student-join.md
-section 3): the session this Pi was provisioned for by the last confirmed
-tap, the student the examiner assigned to it, and a `joinKey` derived from
-the session secret. DevApp-main proves possession of that key when joining,
-which is what lets the server tell a join from this device apart from one
-made on a student's own machine. The secret itself never leaves the Pi.
+The exam app reaches the server only through this Pi's WireGuard tunnel
+(pie-api-main/app/core/tunnel.py): `/device-identity` gives it the server's
+address inside the tunnel, not `apiBaseUrl`, and the server tells which
+device a request comes from by its tunnel address. The tunnel's private
+key is created here and never leaves the Pi; ensure_tunnel() registers its
+public key over the TLS-PSK port and configures wg0. Until the tunnel is
+set up for the current `apiBaseUrl`, `/device-identity` answers 503.
+
+It also serves `GET /session`: the session this Pi was provisioned for by
+the last confirmed tap, and the student the examiner assigned to it, which
+the exam app shows before the join. No secret leaves the Pi: the tunnel is
+what lets the server tell a join from this device apart from one made on a
+student's own machine.
 
 A confirmed tap stays valid until its session ends, surviving reboots in
 between (tap-gated-student-join.md section 7). A background thread asks the
@@ -47,17 +54,20 @@ it into normal mode right after a claim — see run_claim_listener()).
 """
 
 import base64
-import hmac
+import binascii
+import grp
+import ipaddress
 import json
 import os
 import ssl
+import subprocess
 import threading
 import time
 import urllib.error
 import urllib.request
-from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from pie_tls import device_api_url, device_tls_context
 
@@ -78,8 +88,29 @@ SERVER_CA_FILE = Path("/etc/pie/server-ca.json")
 SERVER_CA_REFRESH_SECONDS = 3600
 
 SESSION_CHECK_SECONDS = 30
+# How often the loop looks for a session tapped since the last check, so the
+# filtering proxy gets the new session's allowlist within seconds.
+LOOP_SECONDS = 2
+# ...but no more often than this while the server can't be reached.
+NEW_SESSION_RETRY_SECONDS = 5
 
-JOIN_LABEL = "pie-join-v1"
+# What the filtering proxy (pie_filter.py, user pie-proxy) enforces: the
+# session's allowed links and the assigned student's NMEC, from the server's
+# answer about the session. Absent without a session.
+FILTER_FILE = Path("/etc/pie/filter.json")
+PROXY_GROUP = "pie-proxy"
+# The filtering proxy's CA, which the exam OS trusts (GET /proxy-ca).
+PROXY_CA_FILE = Path("/var/lib/pie-proxy/mitmproxy-ca-cert.pem")
+
+# The WireGuard tunnel to the server (ensure_tunnel()). The private key and
+# wg0's configuration hold the same secret, so both are 0600; the tunnel
+# record holds nothing secret.
+WG_KEY_FILE = Path("/etc/pie/wg.key")
+WG_CONF_FILE = Path("/etc/wireguard/wg0.conf")
+TUNNEL_FILE = Path("/etc/pie/tunnel.json")
+# Registered again this often, so a server whose tunnel service was reset
+# learns this Pi's key again without a new tap.
+TUNNEL_REFRESH_SECONDS = 3600
 
 # Bound to all interfaces rather than usb0's specific address (192.168.7.2):
 # usb0 may come up after this service starts (it depends on the attached
@@ -91,26 +122,14 @@ BIND_HOST = "0.0.0.0"
 BIND_PORT = 8100
 
 
-def b64u_encode(raw: bytes) -> str:
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-
-
-def b64u_decode(encoded: str) -> bytes:
-    return base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
-
-
-def join_key(secret: bytes, device_id: int, session_id: int) -> bytes:
-    """Must match join_key() in pie-api-main/app/api/routes/device.py."""
-    message = f"{JOIN_LABEL}|{device_id}|{session_id}".encode("utf-8")
-    return hmac.new(secret, message, sha256).digest()
-
-
 class DeviceIdentityHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/device-identity":
             self._serve_device_identity()
         elif self.path == "/session":
             self._serve_session()
+        elif self.path == "/proxy-ca":
+            self._serve_proxy_ca()
         else:
             self._respond(404, {"error": "not found"})
 
@@ -126,10 +145,18 @@ class DeviceIdentityHandler(BaseHTTPRequestHandler):
 
         try:
             config = json.loads(DEVICE_CONFIG_FILE.read_text(encoding="utf-8"))
-            identity = {"deviceId": config["deviceId"], "apiBaseUrl": config["apiBaseUrl"]}
+            identity = {"deviceId": config["deviceId"]}
         except Exception:
             self._respond(500, {"error": "device.json unreadable or malformed"})
             return
+
+        tunnel = current_tunnel(config) or ensure_tunnel(throttle=True)
+        if not tunnel:
+            # The exam app can only reach the server through the tunnel;
+            # it retries like it does for "unclaimed".
+            self._respond(503, {"error": "tunnel to the server not set up yet"})
+            return
+        identity["apiBaseUrl"] = tunnel["apiUrl"]
 
         ca_cert = current_server_ca(config) or refresh_server_ca(throttle=True)
         if not ca_cert:
@@ -151,20 +178,33 @@ class DeviceIdentityHandler(BaseHTTPRequestHandler):
         try:
             config = json.loads(DEVICE_CONFIG_FILE.read_text(encoding="utf-8"))
             session = json.loads(SESSION_STATE_FILE.read_text(encoding="utf-8"))
-            device_id = int(config["deviceId"])
-            session_id = int(session["sessionId"])
-            key = join_key(b64u_decode(session["secret"]), device_id, session_id)
             body = {
-                "sessionId": session_id,
+                "sessionId": int(session["sessionId"]),
                 "nmec": str(session["nmec"]),
                 "name": str(session.get("name", "")),
-                "joinKey": b64u_encode(key),
             }
         except Exception:
             self._respond(500, {"error": "session.json unreadable or malformed"})
             return
 
         self._respond(200, body)
+
+    def _serve_proxy_ca(self):
+        """The filtering proxy's CA, which the exam OS installs for its
+        browser at boot: the only thing it needs to know about the
+        filtering, which happens here."""
+        try:
+            pem = PROXY_CA_FILE.read_text(encoding="ascii")
+            ssl.PEM_cert_to_DER_cert(pem)
+        except (OSError, ValueError):
+            self._respond(503, {"error": "proxy CA not created yet"})
+            return
+        payload = pem.encode("ascii")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-pem-file")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
 
     def _respond(self, status: int, body: dict):
         payload = json.dumps(body).encode("utf-8")
@@ -205,7 +245,27 @@ def expire_ended_session():
 
     if body.get("active") is False:
         SESSION_STATE_FILE.unlink(missing_ok=True)
+        FILTER_FILE.unlink(missing_ok=True)
         print(f"Session {session_id} is no longer active; removed {SESSION_STATE_FILE}.")
+    elif body.get("active") is True:
+        write_filter(body.get("allowedLinks") or [], str(body.get("nmec") or ""))
+
+
+def write_filter(allowed_links: list, nmec: str):
+    """Updates the proxy's filter if it changed. Readable by the proxy's
+    group only: it names the assigned student."""
+    content = json.dumps({"allowedLinks": [str(link) for link in allowed_links], "nmec": nmec}, indent=2) + "\n"
+    if FILTER_FILE.exists() and FILTER_FILE.read_text(encoding="utf-8") == content:
+        return
+    tmp_path = FILTER_FILE.with_suffix(".tmp")
+    tmp_path.write_text(content, encoding="utf-8")
+    try:
+        os.chown(tmp_path, 0, grp.getgrnam(PROXY_GROUP).gr_gid)
+        os.chmod(tmp_path, 0o640)
+    except KeyError:
+        os.chmod(tmp_path, 0o644)  # no proxy group on this device
+    tmp_path.replace(FILTER_FILE)
+    print(f"Filter updated: {len(allowed_links)} allowed links, assigned NMEC {nmec or '(none)'}.")
 
 
 def current_server_ca(config: dict, max_age: float | None = None) -> str | None:
@@ -266,17 +326,161 @@ def refresh_server_ca(throttle: bool = False) -> str | None:
         return ca_cert
 
 
+def current_tunnel(config: dict, max_age: float | None = None) -> dict | None:
+    """The tunnel record, if it was set up for this apiBaseUrl (and, with
+    max_age, recently enough) and wg0 is up."""
+    try:
+        tunnel = json.loads(TUNNEL_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if tunnel.get("apiBaseUrl") != config.get("apiBaseUrl"):
+        return None
+    if max_age is not None and time.time() - float(tunnel.get("registeredAt", 0)) > max_age:
+        return None
+    if subprocess.run(["wg", "show", "wg0"], capture_output=True).returncode != 0:
+        return None
+    return tunnel
+
+
+def _wireguard_key(value) -> str:
+    key = str(value)
+    try:
+        if len(base64.b64decode(key, validate=True)) == 32:
+            return key
+    except (binascii.Error, ValueError):
+        pass
+    raise ValueError("not a WireGuard key")
+
+
+def _private_key() -> str:
+    """This Pi's tunnel key, created on first use; it never leaves the Pi."""
+    if WG_KEY_FILE.exists():
+        return _wireguard_key(WG_KEY_FILE.read_text(encoding="ascii").strip())
+    key = subprocess.run(["wg", "genkey"], capture_output=True, text=True, check=True).stdout.strip()
+    WG_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = WG_KEY_FILE.with_suffix(".tmp")
+    tmp_path.write_text(key + "\n", encoding="ascii")
+    os.chmod(tmp_path, 0o600)
+    tmp_path.replace(WG_KEY_FILE)
+    return key
+
+
+_tunnel_lock = threading.Lock()
+_tunnel_last_failure = 0.0
+TUNNEL_RETRY_SECONDS = 10
+
+
+def ensure_tunnel(throttle: bool = False) -> dict | None:
+    """Registers this Pi's tunnel key with the server over the TLS-PSK port
+    and brings up wg0 with what the server answers. Returns the tunnel, or
+    None if it couldn't be set up (the previous one is kept)."""
+    global _tunnel_last_failure
+    with _tunnel_lock:
+        if throttle and time.monotonic() - _tunnel_last_failure < TUNNEL_RETRY_SECONDS:
+            return None
+        try:
+            config = json.loads(DEVICE_CONFIG_FILE.read_text(encoding="utf-8"))
+            device_id = int(config["deviceId"])
+            private_key = _private_key()
+            public_key = subprocess.run(
+                ["wg", "pubkey"], input=private_key, capture_output=True, text=True, check=True
+            ).stdout.strip()
+            url = f"{device_api_url(config['apiBaseUrl'])}/device/{device_id}/tunnel"
+            request = urllib.request.Request(
+                url,
+                data=json.dumps({"publicKey": public_key}).encode("utf-8"),
+                headers={"X-Device-Key": config["deviceApiKey"], "Content-Type": "application/json"},
+                method="POST",
+            )
+            context = device_tls_context(device_id, config["deviceApiKey"])
+            with urllib.request.urlopen(request, timeout=5, context=context) as response:
+                answer = json.loads(response.read().decode("utf-8"))
+
+            # Everything below goes into wg0.conf, so it is checked first.
+            address = ipaddress.IPv4Interface(answer["address"])
+            server_ip = ipaddress.IPv4Address(answer["serverAddress"])
+            server_key = _wireguard_key(answer["serverPublicKey"])
+            port = int(answer["endpointPort"])
+            api_url = str(answer["apiUrl"])
+            if not 0 < port < 65536 or not api_url.startswith(f"https://{server_ip}:"):
+                raise ValueError("unexpected tunnel answer")
+            host = urlsplit(config["apiBaseUrl"]).hostname or ""
+            if ":" in host:
+                endpoint = f"[{ipaddress.IPv6Address(host)}]:{port}"
+            elif host and all(c.isascii() and (c.isalnum() or c in ".-") for c in host):
+                endpoint = f"{host}:{port}"
+            else:
+                raise ValueError(f"unusable server host {host!r}")
+
+            wg_conf = (
+                "[Interface]\n"
+                f"PrivateKey = {private_key}\n"
+                f"Address = {address}\n"
+                "\n"
+                "[Peer]\n"
+                f"PublicKey = {server_key}\n"
+                f"Endpoint = {endpoint}\n"
+                # Only the server goes through the tunnel; everything else
+                # the exam host reaches leaves through the Wi-Fi as before.
+                f"AllowedIPs = {server_ip}/32\n"
+                "PersistentKeepalive = 25\n"
+            )
+            current = WG_CONF_FILE.read_text(encoding="ascii") if WG_CONF_FILE.exists() else ""
+            interface_up = subprocess.run(["wg", "show", "wg0"], capture_output=True).returncode == 0
+            if wg_conf != current or not interface_up:
+                WG_CONF_FILE.parent.mkdir(parents=True, exist_ok=True)
+                tmp_path = WG_CONF_FILE.with_suffix(".tmp")
+                tmp_path.write_text(wg_conf, encoding="ascii")
+                os.chmod(tmp_path, 0o600)
+                tmp_path.replace(WG_CONF_FILE)
+                subprocess.run(["systemctl", "enable", "wg-quick@wg0"], capture_output=True, check=True)
+                subprocess.run(["systemctl", "restart", "wg-quick@wg0"], capture_output=True, check=True)
+                print(f"Tunnel up: {address} to {server_ip} via {endpoint}.")
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError,
+                subprocess.CalledProcessError, urllib.error.URLError) as exc:
+            print(f"Tunnel setup failed: {exc}")
+            _tunnel_last_failure = time.monotonic()
+            return None
+
+        tunnel = {
+            "apiBaseUrl": config["apiBaseUrl"],
+            "apiUrl": api_url,
+            "address": str(address),
+            "registeredAt": int(time.time()),
+        }
+        tmp_path = TUNNEL_FILE.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(tunnel) + "\n", encoding="utf-8")
+        os.chmod(tmp_path, 0o644)
+        tmp_path.replace(TUNNEL_FILE)
+        return tunnel
+
+
 def session_expiry_loop():
+    last_check = 0.0
     while True:
-        expire_ended_session()
-        if DEVICE_CONFIG_FILE.exists():
-            try:
-                config = json.loads(DEVICE_CONFIG_FILE.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                config = None
-            if config and not current_server_ca(config, max_age=SERVER_CA_REFRESH_SECONDS):
-                refresh_server_ca()
-        time.sleep(SESSION_CHECK_SECONDS)
+        if not SESSION_STATE_FILE.exists():
+            FILTER_FILE.unlink(missing_ok=True)
+        # A session tapped since the last check is checked at once, so the
+        # proxy gets its allowlist within seconds; otherwise every
+        # SESSION_CHECK_SECONDS.
+        new_session = (
+            SESSION_STATE_FILE.exists()
+            and (not FILTER_FILE.exists() or SESSION_STATE_FILE.stat().st_mtime > FILTER_FILE.stat().st_mtime)
+        )
+        since_check = time.monotonic() - last_check
+        if (new_session and since_check >= NEW_SESSION_RETRY_SECONDS) or since_check >= SESSION_CHECK_SECONDS:
+            last_check = time.monotonic()
+            expire_ended_session()
+            if DEVICE_CONFIG_FILE.exists():
+                try:
+                    config = json.loads(DEVICE_CONFIG_FILE.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    config = None
+                if config and not current_server_ca(config, max_age=SERVER_CA_REFRESH_SECONDS):
+                    refresh_server_ca()
+                if config and not current_tunnel(config, max_age=TUNNEL_REFRESH_SECONDS):
+                    ensure_tunnel()
+        time.sleep(LOOP_SECONDS)
 
 
 def main():

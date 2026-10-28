@@ -103,6 +103,7 @@ class ExamHceService : HostApduService() {
             .put("k", sharedSecretB64u)
             .put("u", parsed.optString("apiBaseUrl", ""))
             .put("exp", nowEpochSec + ttlSec)
+        examWifi(parsed)?.let { payload.put("w", it) }
 
         return respondEncrypted(readerKey, INS_GET_PROVISION_TOKEN, payload)
     }
@@ -122,6 +123,7 @@ class ExamHceService : HostApduService() {
             .put("deviceId", parsed.optInt("deviceId"))
             .put("apiKey", parsed.optString("apiKey"))
             .put("apiBaseUrl", parsed.optString("apiBaseUrl"))
+        examWifi(parsed)?.let { response.put("w", it) }
 
         // Single-use on the phone side too, whether or not the reader
         // actually accepts this response — a second stray tap must not be
@@ -129,6 +131,19 @@ class ExamHceService : HostApduService() {
         pendingDeviceIdentityJson = ""
 
         return respondEncrypted(readerKey, INS_GET_DEVICE_IDENTITY, response)
+    }
+
+    /** The exam room's network from the app's JSON, in the short form both
+     *  taps carry ({t, s, p}), or null to leave the device's network as is.
+     *  Read by the reader's apply_wifi(). */
+    private fun examWifi(parsed: JSONObject): JSONObject? {
+        val wifi = parsed.optJSONObject("wifi") ?: return null
+        val ssid = wifi.optString("ssid", "")
+        if (ssid.isEmpty()) return null
+        return JSONObject()
+            .put("t", wifi.optString("type", "psk"))
+            .put("s", ssid)
+            .put("p", wifi.optString("psk", ""))
     }
 
     private fun handleGetResponse(): ByteArray {

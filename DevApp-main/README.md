@@ -11,19 +11,23 @@ the examiner's tap to submission:
    registered, it shows "Dispositivo não provisionado".
 2. **Waits for the examiner.** The examiner checks the student's card and
    taps the phone on the device. The app then gets the session, the
-   assigned student and a join key (`GET …/session`). Until then it shows
+   assigned student (`GET …/session`). Until then it shows
    "A aguardar o examinador".
 3. **Join.** There is no login: the app shows the student the examiner
    assigned to the device (name and number), and the student enters the
-   session's join code. The server accepts the join only from this device,
-   and only for that student; the proof is an HMAC with the join key, sent
-   with the request (`POST /session-users/join`). The server answers with
-   the student's token, used for the rest of the exam.
+   session's join code (`POST /session-users/join`, nothing else). The app
+   reaches the server only through the PIE device's tunnel (the address it
+   gets from the device is the server's tunnel address), which is how the
+   server knows the device, and from it the student. The server answers
+   with the student's token, used for the rest of the exam; it only works
+   through that device's tunnel.
 4. **Exam.**
    - **The exam:** either a file (downloaded, decrypted and unpacked into
      `~/Desktop/Exam`) or a link, opened in Firefox.
-   - **Firefox:** the session's allowed links are written to the proxy's
-     whitelist (`/etc/iptables/whitelist.txt`), so only those sites open.
+   - **Firefox:** the PIE device filters the laptop's web traffic, so only
+     the session's links open. The app writes them to
+     `/etc/iptables/whitelist.txt` only to show them to the student
+     ("Sites permitidos"); nothing in the exam OS enforces them.
    - **Control:** the teacher's start, extra time and finish messages arrive
      over the server's pub/sub channel.
 5. **Monitoring.** Activity logs are sent to the server throughout the exam,
@@ -54,7 +58,7 @@ The UI is in Portuguese.
 |---|---|---|
 | `piIdentityUrl` | `http://192.168.7.2:8100` | The PIE device's identity service, over the USB link |
 | `examDirectory` | `/home/student/Desktop/Exam` | Where the exam file is unpacked, and what is submitted |
-| `whitelistFile` | `/etc/iptables/whitelist.txt` | The proxy's whitelist, written when the student joins |
+| `whitelistFile` | `/etc/iptables/whitelist.txt` | The session's allowed links, written at the join to show them to the student (the filtering is on the PIE device) |
 | `logsDirectory` | `/var/log/pie-devapp` | Local logs |
 
 ## Build

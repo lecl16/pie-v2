@@ -20,8 +20,9 @@ into an exam laptop's USB port. Two separate systems are involved:
     which the Pi routes to the exam room's Wi-Fi, with a DNS forwarder.
 
 The laptop's only network is that USB link. The Pi's firewall forwards it to
-the Wi-Fi and accepts nothing else from it, except the identity service and
-DNS.
+the Wi-Fi, and its traffic to the server into the Pi's WireGuard tunnel
+(`wg0`, see `NFC-Support/README.md`), and accepts nothing else from it,
+except the identity service and DNS.
 
 One image serves every device and every deployment: it holds no server
 address, device identity or certificate. Those reach the Pi in the
@@ -36,15 +37,12 @@ examiner's NFC taps, and the Pi relays them to the exam app.
 | Account `student` (password `pie`), logged in automatically by lightdm. No administrator account: root is locked, the `sudo` group is empty, live-config's default user is not created (`user-setup` pinned out, `live-config.noroot`) | `hooks/live/0100-add-user.hook.chroot`, `archives/no-admin-accounts.pref.chroot`, `../Makefile` |
 | The exam app in `/opt/devapp`, started by `devapp.service` | `includes.chroot/opt/devapp/`, `includes.chroot/etc/systemd/system/devapp.service` |
 | Network only on the USB link, configured by systemd-networkd. No NetworkManager, Wi-Fi tools or DHCP client; Wi-Fi and Bluetooth drivers blocked | `includes.chroot/etc/systemd/network/`, `archives/no-network-managers.pref.chroot`, `includes.chroot/etc/modprobe.d/pie-no-wireless.conf`, `includes.chroot/etc/tmpfiles.d/pie-resolv.conf` |
-| Firefox goes through an intercepting proxy (mitmproxy, port 8081) that allows only the session's links. Firefox trusts the proxy's CA by enterprise policy | `includes.chroot/usr/local/bin/whitelist.py`, `inject-cert.sh`, `init-mitmproxy.sh`, `includes.chroot/usr/lib/firefox-esr/` |
+| No filtering rules: the PIE device filters the laptop's web traffic (its transparent proxy, see `NFC-Support/README.md`). Firefox only trusts the device's CA, which `pie-device-ca.service` fetches from the device at boot (`GET http://192.168.7.2:8100/proxy-ca`), by enterprise policy | `includes.chroot/usr/local/bin/pie-device-ca.sh`, `includes.chroot/etc/systemd/system/pie-device-ca.service`, `includes.chroot/usr/lib/firefox-esr/distribution/policies.json` |
 | The exam app may power the laptop off at the end (polkit rule) | `includes.chroot/etc/polkit-1/rules.d/50-pie-poweroff.rules`, `hooks/live/0120-polkit-rules-owner.hook.chroot` |
 
-The proxy's whitelist (`/etc/iptables/whitelist.txt`) is written by the
-exam app when the student joins:
-- an entry allows everything under it; an entry with a query string allows
-  that page only;
-- files that an allowed page loads are allowed, from any host;
-- UA's login hosts are always allowed.
+The exam OS is the same for every exam: which sites are allowed, and which
+eLearning account, is decided on the PIE device, so booting another system
+on the laptop does not escape it.
 
 ### Build it
 
@@ -119,21 +117,27 @@ needed for TLS-PSK).
    sudo bash aux-files/apply-pi-gateway-setup.sh /media/$USER/rootfs /media/$USER/bootfs "<exam Wi-Fi SSID>" "<Wi-Fi password>"
    ```
    This writes:
-   - the Wi-Fi connection and the `usb0` address (NetworkManager);
+   - the initial Wi-Fi connection (`ExamWiFi`) and the `usb0` address
+     (NetworkManager). Afterwards, the examiner's taps can change the Wi-Fi
+     (see `NFC-Support/README.md`);
    - IP forwarding;
    - the DNS forwarder for the laptop (dnsmasq on `usb0`);
    - the nftables rules (below).
 
-   It also installs dnsmasq, nftables and the SSH server, and enables them.
+   It also installs dnsmasq, nftables, the SSH server and `wireguard-tools`
+   (the tunnel to the server), and enables them.
 5. **Install the device services:**
    ```bash
    sudo bash aux-files/install-nfc-reader.sh /media/$USER/rootfs
    ```
-   This copies `reader_script.py`, `device_identity_server.py` and
-   `pie_tls.py` to `/opt/nfc-reader/`, installs their systemd units
-   (`nfc-reader`, `pie-device-identity`, `nfc-venv-init`) and enables them.
+   This copies `reader_script.py`, `device_identity_server.py`,
+   `pie_tls.py` and `pie_filter.py` to `/opt/nfc-reader/`, installs their
+   systemd units (`nfc-reader`, `pie-device-identity`, `pie-proxy`,
+   `nfc-venv-init`) and enables them.
 6. **First boot, with Wi-Fi access.** `nfc-venv-init.service` builds
-   `liblgpio` and the Python environment once; this takes several minutes.
+   `liblgpio` and the Python environment once, and installs mitmproxy from
+   PyPI into `/opt/pie-proxy/venv` (Trixie has no package for it); this
+   takes several minutes.
    It runs on the Pi itself because `adafruit-blinka` detects the board it
    is installed on. Then, over SSH (`ssh pie@raspberrypi.local`), add the two
    units that make the USB link reliable at boot:
@@ -200,9 +204,11 @@ table inet filter {
         meta l4proto ipv6-icmp accept
 
         # From the exam host (USB link): the identity service
-        # (device_identity_server.py, which binds 0.0.0.0) and dnsmasq.
+        # (device_identity_server.py, which binds 0.0.0.0), dnsmasq, and the
+        # filtering proxy its web traffic is redirected to (pie-proxy.service).
         iifname "usb0" tcp dport 8100 accept
         iifname "usb0" meta l4proto { tcp, udp } th dport 53 accept
+        iifname "usb0" tcp dport 8080 accept
 
         # From the exam room's network (Wi-Fi uplink): DHCP replies and
         # mDNS (raspberrypi.local).
@@ -215,11 +221,15 @@ table inet filter {
         tcp dport 22 accept
     }
 
-    # The exam host's traffic is forwarded to the uplink; nothing else is.
+    # Only the exam host's traffic to the server is forwarded, through the
+    # WireGuard tunnel (wg0, set up by device_identity_server.py, whose
+    # routes only cover the server's tunnel address). Its web traffic goes
+    # through the filtering proxy instead (prerouting, below), which makes
+    # its own connections; nothing else reaches the Wi-Fi.
     chain forward {
         type filter hook forward priority filter; policy drop;
         ct state established,related accept
-        iifname "usb0" oifname "wlan0" accept
+        iifname "usb0" oifname "wg0" accept
     }
 
     chain output {
@@ -228,9 +238,19 @@ table inet filter {
 }
 
 table inet nat {
+    # The exam host's web traffic goes to the filtering proxy, except its
+    # traffic to the server's tunnel address.
+    chain prerouting {
+        type nat hook prerouting priority dstnat;
+        iifname "usb0" ip daddr != 10.77.0.1 tcp dport { 80, 443 } redirect to :8080
+    }
+
     chain postrouting {
         type nat hook postrouting priority 100;
         oifname "wlan0" masquerade
+        # The server tells which device a request comes from by this Pi's
+        # tunnel address, so the exam host's traffic takes it.
+        oifname "wg0" masquerade
     }
 }
 ```
@@ -247,7 +267,7 @@ To apply changed rules to a device that is already set up, copy the file to
 |---|---|
 | A new exam OS image | Power the device off, mount its SD card, and copy the new ISO as in step 3 |
 | A new version of the device services | Run `install-nfc-reader.sh` against the mounted card, or copy the files to `/opt/nfc-reader/` and run `sudo systemctl restart nfc-reader pie-device-identity` |
-| Another Wi-Fi network | `sudo nmcli device wifi connect "<SSID>" password "<password>"` |
+| Another Wi-Fi network | Set it under **Exam Room Wi-Fi** in the Examiner App: the next tap carries it |
 | Another server address | Nothing on the device: the next session tap carries it |
 
 ### Shutting down

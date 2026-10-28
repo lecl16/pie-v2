@@ -10,12 +10,13 @@ from app.core.config import config
 from app.core.database import get_db
 from app.core.device_psk import new_wrapped_psk
 from app.core.security import generate_device_api_key, hash_device_key
+from app.core.tunnel import device_tunnel_ip, server_public_key, valid_wireguard_key, write_peers
 from app.models.db.device import Device
 from app.models.db.device_provisioning_secret import DeviceProvisioningSecret
 from app.models.db.examiner_phone import ExaminerPhone
 from app.models.db.session import Session as ExamSession
 from app.models.db.user import User
-from app.schemas.device import DeviceCreate, DeviceUpdate, DeviceOut, DeviceCreated
+from app.schemas.device import DeviceCreate, DeviceUpdate, DeviceOut, DeviceCreated, DeviceTunnel, DeviceTunnelRegister
 from app.schemas.device_provisioning_secret import (
     DeviceProvisioningSecretConfirm,
     DeviceProvisioningSecretConfirmed,
@@ -95,6 +96,7 @@ def delete_device(device_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Device not found")
     db.delete(device)
     db.commit()
+    write_peers(db)
     return device
 
 @router.post("/{device_id}/rotate-key", response_model=DeviceCreated)
@@ -115,7 +117,11 @@ def rotate_device_key(device_id: int, db: Session = Depends(get_db)):
     api_key = generate_device_api_key()
     device.device_api_key_hash = hash_device_key(api_key)
     device.tls_psk_enc = new_wrapped_psk(api_key, device.id)
+    # The old device's tunnel goes with its key: a device registered
+    # again with the new key registers a new tunnel key too.
+    device.wg_public_key = None
     db.commit()
+    write_peers(db)
     db.refresh(device)
     return DeviceCreated(
         id=device.id,
@@ -132,22 +138,6 @@ def provisioning_confirm_mac(secret_b64u: str, label: str, device_id: int, sessi
     """Must match confirm_proof() in NFC-Support/reader_script.py."""
     message = f"{label}|{device_id}|{session_id}|{nonce}".encode("utf-8")
     return b64u_encode(hmac.new(b64u_decode(secret_b64u), message, sha256).digest())
-
-JOIN_LABEL = "pie-join-v1"
-
-def join_key(secret_b64u: str, device_id: int, session_id: int) -> bytes:
-    """Key the Pi derives from the session secret and hands to DevApp-main,
-    so the secret itself never leaves the Pi — see
-    docs/tap-gated-student-join.md section 3. Must match join_key() in
-    NFC-Support/device_identity_server.py."""
-    message = f"{JOIN_LABEL}|{device_id}|{session_id}".encode("utf-8")
-    return hmac.new(b64u_decode(secret_b64u), message, sha256).digest()
-
-def join_mac(secret_b64u: str, device_id: int, session_id: int, nmec: int, nonce: str) -> str:
-    """Proof DevApp-main sends with its session join (section 4). Must match
-    _joinMac() in DevApp-main/lib/main.dart."""
-    message = f"{JOIN_LABEL}|{device_id}|{session_id}|{nmec}|{nonce}".encode("utf-8")
-    return b64u_encode(hmac.new(join_key(secret_b64u, device_id, session_id), message, sha256).digest())
 
 @router.post(
     "/{device_id}/provisioning-secret/{session_id}/confirm",
@@ -214,7 +204,8 @@ def provisioned_session_status(
 ):
     """Polled by the Pi's device_identity_server.py so it can drop its
     session.json once the provisioning no longer lets anyone join — see
-    docs/tap-gated-student-join.md section 7. A confirmed tap stays valid
+    docs/tap-gated-student-join.md section 7 — and so its filtering proxy
+    has the session's allowed links and the assigned student. A confirmed tap stays valid
     across reboots until then. The X-Device-Key here is safe to send: the
     Pi only polls the apiBaseUrl the server already proved itself on in the
     confirmation (docs/examiner-trusted-node-provisioning.md section 4)."""
@@ -232,7 +223,15 @@ def provisioned_session_status(
         and secret_row is not None
         and secret_row.claimed_at is not None
     )
-    return {"active": active}
+    if not active:
+        return {"active": False}
+    # What the Pi's filtering proxy enforces for this session: the allowed
+    # links and, when the exam is a web page, its link; and the assigned
+    # student, whose NMEC the proxy checks against the eLearning account.
+    links = list(exam_session.allowed_links or [])
+    if exam_session.exam_link:
+        links.append(exam_session.exam_link)
+    return {"active": True, "allowedLinks": links, "nmec": str(secret_row.nmec or "")}
 
 @router.get("/{device_id}/server-ca")
 def server_ca(device_id: int, device: Device = Depends(get_device)):
@@ -249,3 +248,36 @@ def server_ca(device_id: int, device: Device = Depends(get_device)):
     except OSError:
         raise HTTPException(status_code=503, detail="Server CA not configured")
     return {"caCert": pem}
+
+@router.post("/{device_id}/tunnel", response_model=DeviceTunnel)
+def register_tunnel(
+    device_id: int,
+    payload: DeviceTunnelRegister,
+    device: Device = Depends(get_device),
+    db: Session = Depends(get_db),
+):
+    """Registers the device's WireGuard public key (app/core/tunnel.py) and
+    returns its tunnel. Called by the device over its TLS-PSK port, so the
+    key comes from the device that holds this device's key; idempotent, and
+    called again whenever the device's key or the server's address changes.
+    The private key never leaves the device."""
+    if device.id != device_id:
+        raise HTTPException(status_code=403, detail="Not this device")
+    if not valid_wireguard_key(payload.publicKey):
+        raise HTTPException(status_code=422, detail="Invalid WireGuard public key")
+    server_key = server_public_key()
+    if server_key is None:
+        raise HTTPException(status_code=503, detail="Tunnel service not running")
+
+    if device.wg_public_key != payload.publicKey:
+        device.wg_public_key = payload.publicKey
+        db.commit()
+        write_peers(db)
+
+    return DeviceTunnel(
+        address=f"{device_tunnel_ip(device.id)}/32",
+        serverAddress=config.TUNNEL_SERVER_IP,
+        serverPublicKey=server_key,
+        endpointPort=config.TUNNEL_PORT,
+        apiUrl=f"https://{config.TUNNEL_SERVER_IP}:{config.TUNNEL_API_PORT}",
+    )

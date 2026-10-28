@@ -37,7 +37,8 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 const { NfcHceModule, PhoneCredentialModule } = NativeModules;
 
 // Matches ExamHceService.kt's handleGetProvisionToken(), which reads
-// sessionId/nmec/apiBaseUrl/ttlSec from this JSON and ignores anything else.
+// sessionId/nmec/apiBaseUrl/ttlSec/wifi from this JSON and ignores anything
+// else.
 // ttlSec only governs how long the encrypted payload built at tap time is
 // valid for, so it stays a fixed local default.
 const TOKEN_TTL_SECONDS = 60;
@@ -94,12 +95,22 @@ interface NativeHceModule {
   clearPendingDeviceIdentity?: () => void;
 }
 
-// Matches ExamHceService.kt's handleGetDeviceIdentity(), which reads exactly
-// these three fields and ignores anything else.
+// The exam room's wireless network, delivered in both taps so the device
+// joins it (WPA2-Personal only; see examWifi() below). Matches the reader's
+// apply_wifi().
+interface ExamWifi {
+  type: 'psk';
+  ssid: string;
+  psk: string;
+}
+
+// Matches ExamHceService.kt's handleGetDeviceIdentity(), which reads these
+// fields and ignores anything else.
 interface DeviceIdentity {
   deviceId: number;
   apiKey: string;
   apiBaseUrl: string;
+  wifi?: ExamWifi;
 }
 
 const nfcHceModule = NfcHceModule as NativeHceModule | undefined;
@@ -183,6 +194,11 @@ function AppContent(): React.JSX.Element {
   } | null>(null);
   const [studentFilter, setStudentFilter] = useState('');
 
+  // The exam room's Wi-Fi, sent in every tap while set. In memory only,
+  // like the server address.
+  const [wifiSsid, setWifiSsid] = useState('');
+  const [wifiPassword, setWifiPassword] = useState('');
+
   const [newDeviceName, setNewDeviceName] = useState('');
   const [deviceBusy, setDeviceBusy] = useState(false);
   const [pendingIdentity, setPendingIdentity] = useState<{ id: number; name: string } | null>(
@@ -193,6 +209,23 @@ function AppContent(): React.JSX.Element {
   );
 
   const baseUrl = useCallback(() => apiBaseUrl.trim().replace(/\/$/, ''), [apiBaseUrl]);
+
+  // The network for the taps, or undefined to leave the device's network as
+  // it is. Throws on values the device would reject anyway.
+  const examWifi = useCallback((): ExamWifi | undefined => {
+    const ssid = wifiSsid.trim();
+    if (!ssid) {
+      return undefined;
+    }
+    // UTF-8 length: each %XX escape is one byte.
+    if (encodeURIComponent(ssid).replace(/%[0-9A-F]{2}/gi, 'x').length > 32) {
+      throw new Error('The Wi-Fi name (SSID) is longer than 32 bytes.');
+    }
+    if (wifiPassword.length < 8 || wifiPassword.length > 63) {
+      throw new Error('The Wi-Fi password must have 8 to 63 characters.');
+    }
+    return { type: 'psk', ssid, psk: wifiPassword };
+  }, [wifiSsid, wifiPassword]);
 
   // Asks the server for a certificate for a fresh Keystore key (teacher JWT,
   // public port). Replaces any previous credential of this phone.
@@ -434,6 +467,14 @@ function AppContent(): React.JSX.Element {
       Alert.alert('Incomplete', 'Please fill course, exam, session, device IDs and student NMEC.');
       return;
     }
+    // Before registering anything with the server.
+    let wifi: ExamWifi | undefined;
+    try {
+      wifi = examWifi();
+    } catch (err) {
+      Alert.alert('Wi-Fi', err instanceof Error ? err.message : String(err));
+      return;
+    }
 
     setBusy(true);
     try {
@@ -469,6 +510,7 @@ function AppContent(): React.JSX.Element {
         nmec: studentNmec.trim(),
         apiBaseUrl: apiBaseUrl.trim().replace(/\/$/, ''),
         ttlSec: TOKEN_TTL_SECONDS,
+        wifi,
       });
 
       nfcHceModule.setSecureProvisioning(securePayload, secret);
@@ -494,6 +536,7 @@ function AppContent(): React.JSX.Element {
     deviceId,
     studentNmec,
     provisioningSecretUrl,
+    examWifi,
   ]);
 
   const deactivate = useCallback(() => {
@@ -541,6 +584,14 @@ function AppContent(): React.JSX.Element {
       return;
     }
 
+    let wifi: ExamWifi | undefined;
+    try {
+      wifi = examWifi();
+    } catch (err) {
+      Alert.alert('Wi-Fi', err instanceof Error ? err.message : String(err));
+      return;
+    }
+
     setDeviceBusy(true);
     try {
       // The device gets the public URL: it never uses the phone port.
@@ -564,6 +615,7 @@ function AppContent(): React.JSX.Element {
         deviceId: data.id,
         apiKey: data.api_key,
         apiBaseUrl: trimmedBaseUrl,
+        wifi,
       };
 
       nfcHceModule.setPendingDeviceIdentity(JSON.stringify(identity));
@@ -577,7 +629,7 @@ function AppContent(): React.JSX.Element {
     } finally {
       setDeviceBusy(false);
     }
-  }, [accessToken, apiBaseUrl, phoneBaseUrl, phoneStatus, newDeviceName]);
+  }, [accessToken, apiBaseUrl, phoneBaseUrl, phoneStatus, newDeviceName, examWifi]);
 
   const cancelPendingIdentity = useCallback(() => {
     nfcHceModule?.clearPendingDeviceIdentity?.();
@@ -663,6 +715,40 @@ function AppContent(): React.JSX.Element {
           </>
         )}
       </View>
+
+      {accessToken ? (
+        <View style={styles.card}>
+          <Text style={styles.infoTitle}>Exam Room Wi-Fi</Text>
+          <Text style={styles.infoText}>
+            Sent in every tap while set: the device joins this network before
+            it contacts the server. Leave it empty to keep the device's
+            current network. WPA2-Personal only.
+          </Text>
+
+          <Text style={styles.label}>Network Name (SSID)</Text>
+          <TextInput
+            style={styles.input}
+            value={wifiSsid}
+            onChangeText={setWifiSsid}
+            placeholder="e.g. PIE-Exams"
+            placeholderTextColor="#aaa"
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!active && !pendingIdentity}
+          />
+
+          <Text style={styles.label}>Password</Text>
+          <TextInput
+            style={styles.input}
+            value={wifiPassword}
+            onChangeText={setWifiPassword}
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!active && !pendingIdentity}
+          />
+        </View>
+      ) : null}
 
       {accessToken ? (
         <View style={styles.card}>

@@ -16,3 +16,7 @@ class Device(Base):
     # it is minted and stored wrapped (docs/device-tls-psk.md). Null for a
     # device whose key predates it: rotate the key and register it again.
     tls_psk_enc = Column(String(255), nullable=True)
+    # The device's WireGuard public key (app/core/tunnel.py), registered by
+    # the device over its TLS-PSK port. Its tunnel address follows from its
+    # id. Null until the device registers one; cleared when its key rotates.
+    wg_public_key = Column(String(44), nullable=True)

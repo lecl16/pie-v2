@@ -20,6 +20,9 @@ uuid=$(uuidgen)
 type=wifi
 interface-name=wlan0
 autoconnect=true
+# Above any other Wi-Fi profile on the card; the reader keeps the same
+# value when a tap changes the network (WIFI_AUTOCONNECT_PRIORITY).
+autoconnect-priority=100
 
 [wifi]
 mode=infrastructure
@@ -88,9 +91,11 @@ table inet filter {
         meta l4proto ipv6-icmp accept
 
         # From the exam host (USB link): the identity service
-        # (device_identity_server.py, which binds 0.0.0.0) and dnsmasq.
+        # (device_identity_server.py, which binds 0.0.0.0), dnsmasq, and the
+        # filtering proxy its web traffic is redirected to (pie-proxy.service).
         iifname "usb0" tcp dport 8100 accept
         iifname "usb0" meta l4proto { tcp, udp } th dport 53 accept
+        iifname "usb0" tcp dport 8080 accept
 
         # From the exam room's network (Wi-Fi uplink): DHCP replies and
         # mDNS (raspberrypi.local).
@@ -103,11 +108,15 @@ table inet filter {
         tcp dport 22 accept
     }
 
-    # The exam host's traffic is forwarded to the uplink; nothing else is.
+    # Only the exam host's traffic to the server is forwarded, through the
+    # WireGuard tunnel (wg0, set up by device_identity_server.py, whose
+    # routes only cover the server's tunnel address). Its web traffic goes
+    # through the filtering proxy instead (prerouting, below), which makes
+    # its own connections; nothing else reaches the Wi-Fi.
     chain forward {
         type filter hook forward priority filter; policy drop;
         ct state established,related accept
-        iifname "usb0" oifname "wlan0" accept
+        iifname "usb0" oifname "wg0" accept
     }
 
     chain output {
@@ -116,9 +125,19 @@ table inet filter {
 }
 
 table inet nat {
+    # The exam host's web traffic goes to the filtering proxy, except its
+    # traffic to the server's tunnel address.
+    chain prerouting {
+        type nat hook prerouting priority dstnat;
+        iifname "usb0" ip daddr != 10.77.0.1 tcp dport { 80, 443 } redirect to :8080
+    }
+
     chain postrouting {
         type nat hook postrouting priority 100;
         oifname "wlan0" masquerade
+        # The server tells which device a request comes from by this Pi's
+        # tunnel address, so the exam host's traffic takes it.
+        oifname "wg0" masquerade
     }
 }
 EOF
@@ -129,7 +148,7 @@ mount --bind /dev "$ROOTFS/dev"
 mount --bind /dev/pts "$ROOTFS/dev/pts"
 
 chroot "$ROOTFS" apt update
-chroot "$ROOTFS" apt install -y dnsmasq nftables openssh-server
+chroot "$ROOTFS" apt install -y dnsmasq nftables openssh-server wireguard-tools
 chroot "$ROOTFS" systemctl enable NetworkManager dnsmasq nftables ssh
 
 touch "$BOOTFS/ssh"

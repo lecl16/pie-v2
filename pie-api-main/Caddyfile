@@ -25,6 +25,18 @@
 :8000 {
 	tls /certs/server.crt /certs/server.key
 	request_header -X-Pie-Phone-Cert-Fingerprint
+	request_header -X-Pie-Tunnel-IP
+	import api
+}
+
+# The exam apps behind the PIE devices, reached only through the devices'
+# WireGuard tunnels (the `wireguard` service; this port is not published).
+# Caddy passes the client's tunnel address, which identifies the device
+# (app/core/tunnel.py), replacing anything the client sent.
+:8001 {
+	tls /certs/server.crt /certs/server.key
+	request_header -X-Pie-Phone-Cert-Fingerprint
+	request_header X-Pie-Tunnel-IP {http.request.remote.host}
 	import api
 }
 
@@ -39,6 +51,7 @@
 		}
 	}
 	request_header X-Pie-Phone-Cert-Fingerprint {http.request.tls.client.fingerprint}
+	request_header -X-Pie-Tunnel-IP
 	import api
 }
 

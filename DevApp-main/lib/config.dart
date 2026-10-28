@@ -25,14 +25,12 @@ class Config {
   SecurityContext? _apiSecurityContext;
   http.Client? _apiClient;
   // The session the Pi was provisioned for by the examiner's last confirmed
-  // NFC tap, the student the examiner assigned to this device, and the key
-  // derived from the session secret that proves a join comes from this
-  // device (pie-api-main/docs/tap-gated-student-join.md). In memory only,
-  // like the fields above.
+  // NFC tap, and the student the examiner assigned to this device. In
+  // memory only, like the fields above. Nothing here proves the join: the
+  // server knows the device by the Pi's tunnel the requests arrive through.
   int? _provisionedSessionId;
   String? _provisionedNmec;
   String? _provisionedName;
-  String? _joinKey;
   final String _piIdentityUrl;
   final String _examDirectory;
   final String _logsDirectory;
@@ -220,8 +218,7 @@ class Config {
       throw Exception('Config not loaded. Call Config.load() first.');
     }
     return _instance!._provisionedSessionId != null &&
-        _instance!._provisionedNmec != null &&
-        _instance!._joinKey != null;
+        _instance!._provisionedNmec != null;
   }
 
   static int? get provisionedSessionId => _instance?._provisionedSessionId;
@@ -229,8 +226,6 @@ class Config {
   static String? get provisionedNmec => _instance?._provisionedNmec;
 
   static String? get provisionedName => _instance?._provisionedName;
-
-  static String? get joinKey => _instance?._joinKey;
 
   /// Asks the Pi's device_identity_server.py for the session it was
   /// provisioned for (`GET /session`). A 404 means no confirmed session tap
@@ -249,7 +244,6 @@ class Config {
         _instance!._provisionedSessionId = null;
         _instance!._provisionedNmec = null;
         _instance!._provisionedName = null;
-        _instance!._joinKey = null;
         return;
       }
       if (response.statusCode != 200) {
@@ -258,13 +252,11 @@ class Config {
       final json = jsonDecode(response.body);
       final sessionId = json['sessionId'];
       final nmec = json['nmec'];
-      final joinKey = json['joinKey'];
       final name = json['name'];
-      if (sessionId is int && nmec is String && joinKey is String && joinKey.isNotEmpty) {
+      if (sessionId is int && nmec is String) {
         _instance!._provisionedSessionId = sessionId;
         _instance!._provisionedNmec = nmec;
         _instance!._provisionedName = name is String ? name : null;
-        _instance!._joinKey = joinKey;
       }
     } catch (_) {
       // Pi unreachable — keep whatever we had and let the next poll try again.

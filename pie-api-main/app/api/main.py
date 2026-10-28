@@ -1,5 +1,6 @@
 import fastapi
-from app.core.database import init_db
+from app.core.database import SessionLocal, init_db
+from app.core.tunnel import write_peers
 from app.api.routes.pie import router as pie_router
 from app.api.routes.course import router as course_router
 from app.api.routes.exam import router as exam_router
@@ -113,6 +114,7 @@ DEVICE_SELF_AUTH_PATHS = {
     "/{device_id}/provisioning-secret/{session_id}/confirm",
     "/{device_id}/session/{session_id}/status",  # X-Device-Key (get_device)
     "/{device_id}/server-ca",  # X-Device-Key (get_device)
+    "/{device_id}/tunnel",  # X-Device-Key (get_device)
 }
 device_self_auth_router = fastapi.APIRouter()
 for route in device_router.routes:
@@ -146,10 +148,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def _write_tunnel_peers():
+    db = SessionLocal()
+    try:
+        write_peers(db)
+    finally:
+        db.close()
+
 @app.on_event("startup")
 async def startup_event():
     """Connect to Redis when the app starts."""
     await run_in_threadpool(init_db)
+    # The tunnel peers from the database, in case the shared volume was
+    # recreated (app/core/tunnel.py).
+    await run_in_threadpool(_write_tunnel_peers)
     await redis_pubsub.connect()
     await elasticsearch_service.connect()
     await log_service.connect(elasticsearch_service)
