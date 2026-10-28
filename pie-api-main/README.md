@@ -71,7 +71,7 @@ docker compose exec app python -m scripts.create_admin   # first admin, once
 | API, phone port (client certificate required) | `https://<server>:8443` |
 | API, device port (TLS-PSK, PIE devices only) | `<server>:8444` |
 | Devices' tunnels (WireGuard) | `<server>:51820/udp` |
-| API for the exam apps, inside the tunnels only | `https://10.77.0.1:8001` |
+| API for the exam apps, inside the tunnels only | `http://10.77.0.1:8001` |
 | phpMyAdmin | `http://<server>:8080` |
 | Kibana | `http://<server>:5601` |
 
@@ -79,15 +79,16 @@ After changing the code, rebuild: `docker compose up -d --build`.
 
 ## TLS
 
-Every client reaches the API over TLS:
+Every client reaches the API over TLS, except the exam apps, whose traffic
+is protected by their device's tunnel:
 
 | Port | Who | Authentication |
 |---|---|---|
 | `3000` | The dashboard itself (the `webapp` service) | Server certificate only |
 | `8000` | Dashboard, the examiner app's login and enrollment | Server certificate only |
-| `8001` | Exam apps, through their PIE device's tunnel only; not published (see [Device tunnels](#device-tunnels)) | Server certificate (valid for `10.77.0.1`); the student's token only works from its device's tunnel address |
+| `8001` | Exam apps, through their PIE device's tunnel only; not published (see [Device tunnels](#device-tunnels)) | Plain HTTP inside the tunnel; the student's token only works from its device's tunnel address |
 | `8443` | Enrolled examiner phones: device creation, provisioning secrets, the session and student pickers | Server certificate, plus a client certificate signed by the phone CA (see [Phone enrollment](#phone-enrollment)) |
-| `8444` | PIE devices: provisioning confirmation, session status, the CA they relay to the exam app, their tunnel key | TLS-PSK with a per-device key, served by `device-api`, not Caddy (see [Device TLS-PSK](#device-tls-psk)) |
+| `8444` | PIE devices: provisioning confirmation, session status, their tunnel key | TLS-PSK with a per-device key, served by `device-api`, not Caddy (see [Device TLS-PSK](#device-tls-psk)) |
 
 `scripts/generate-certs.sh` creates, in `certs/` (never committed):
 
@@ -203,7 +204,7 @@ values.
 | `LOG_RETENTION_DAYS`, `LOG_MAX_STREAM_LENGTH` | How long, and how many, log entries Redis streams keep before archival and trimming |
 
 Optional, with defaults that match `generate-certs.sh` and the compose file:
-`SERVER_CA_CERT_PATH` (`certs/ca.crt`), `PHONE_CA_CERT_PATH`,
+`PHONE_CA_CERT_PATH`,
 `PHONE_CA_KEY_PATH` (`certs/phone-ca.*`), `PHONE_CERT_DAYS` (365) and
 `PHONE_MTLS_PORT` (8443).
 
@@ -222,7 +223,7 @@ Optional, with defaults that match `generate-certs.sh` and the compose file:
 | Access level | Routes |
 |---|---|
 | Public | `POST /users/login` |
-| Device (key or HMAC proof, no JWT) | `POST /device/{d}/provisioning-secret/{s}/confirm`, `GET /device/{d}/session/{s}/status`, `GET /device/{d}/server-ca` |
+| Device (key or HMAC proof, no JWT) | `POST /device/{d}/provisioning-secret/{s}/confirm`, `GET /device/{d}/session/{s}/status`, `POST /device/{d}/tunnel` |
 | Authenticated | Sessions, session users, submissions, devices (read), logs, screen-share, `/pie` |
 | Teacher or admin | Courses, exams, analytics, `/examiner-phone/*`, `POST /device/create`, `POST /device/{d}/rotate-key`, `DELETE /device/{d}` |
 | Teacher or admin, from an enrolled phone | Device creation, provisioning-secret registration and removal, the examiner app's session and student lists |
@@ -371,20 +372,6 @@ The keys are stored wrapped with `DEVICE_PSK_WRAP_KEY`, so a copy of the
 database alone doesn't reveal them. The device side is
 `NFC-Support/pie_tls.py`.
 
-### How the exam app trusts the server
-
-The exam app trusts only the deployment's CA, never the public CAs. It
-gets that CA from its PIE device:
-
-1. the device fetches it with `GET /device/{d}/server-ca` over the TLS-PSK
-   link;
-2. it caches it for an hour;
-3. it passes it to the exam app over the USB link, together with the server
-   address.
-
-A rogue tap can't make the exam app trust another CA: that server would
-first have to complete the PSK handshake with the device.
-
 ### Device tunnels
 
 Each PIE device has a WireGuard tunnel to the server (`wireguard` service,
@@ -398,9 +385,10 @@ Each PIE device has a WireGuard tunnel to the server (`wireguard` service,
 - **Split tunnel:** only traffic to the server's tunnel address
   (`10.77.0.1`) goes through it. The allowed sites leave through the exam
   room's Wi-Fi, as before.
-- **The exam app** reaches the API at `https://10.77.0.1:8001`, through
-  the device, with TLS inside the tunnel (the server certificate includes
-  `10.77.0.1`).
+- **The exam app** reaches the API at `http://10.77.0.1:8001`, through
+  the device. Plain HTTP: the tunnel already encrypts and authenticates the
+  traffic, and the device received the server's tunnel key over its TLS-PSK
+  link, so no other server can be at the other end.
 - **The peers** are rewritten from the database by the API
   (`tunnel_data/peers.conf`) whenever a device registers a key, is deleted,
   or has its API key rotated; the `wireguard` service applies them within

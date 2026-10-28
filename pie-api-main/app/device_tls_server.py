@@ -37,7 +37,6 @@ PSK_CACHE_SECONDS = 30
 ALLOWED_ROUTES = [
     ("POST", re.compile(r"^/device/\d+/provisioning-secret/\d+/confirm$")),
     ("GET", re.compile(r"^/device/\d+/session/\d+/status$")),
-    ("GET", re.compile(r"^/device/\d+/server-ca$")),
     ("POST", re.compile(r"^/device/\d+/tunnel$")),
 ]
 

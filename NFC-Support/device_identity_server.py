@@ -18,16 +18,10 @@ refreshed by every confirmed session tap — see
 pie-api-main/docs/examiner-trusted-node-provisioning.md section 5), and
 DevApp-main picks it up from here.
 
-With it, `GET /device-identity` serves `caCert`: the deployment CA that
-DevApp-main uses to verify the server's certificate (its only trust
-anchor for the API). The Pi fetches it from the server over its TLS-PSK
-port, so it comes from the server that holds this device's key — see
-pie-api-main/docs/exam-app-tls.md. Until it has one for the current
-`apiBaseUrl`, `/device-identity` answers 503 and DevApp-main keeps waiting.
-
 The exam app reaches the server only through this Pi's WireGuard tunnel
 (pie-api-main/app/core/tunnel.py): `/device-identity` gives it the server's
-address inside the tunnel, not `apiBaseUrl`, and the server tells which
+address inside the tunnel (plain HTTP: the tunnel already encrypts and
+authenticates the traffic), not `apiBaseUrl`, and the server tells which
 device a request comes from by its tunnel address. The tunnel's private
 key is created here and never leaves the Pi; ensure_tunnel() registers its
 public key over the TLS-PSK port and configures wg0. Until the tunnel is
@@ -80,12 +74,9 @@ DEVICE_CONFIG_FILE = Path("/etc/pie/device.json")
 # never written.
 SESSION_STATE_FILE = Path("/etc/pie/session.json")
 
-# The deployment CA fetched from the server (see refresh_server_ca()), with
-# the apiBaseUrl it was fetched for. Public, so 0644; written only here.
-SERVER_CA_FILE = Path("/etc/pie/server-ca.json")
-# Re-fetched this often, so a re-created CA reaches the exam app without a
-# new tap.
-SERVER_CA_REFRESH_SECONDS = 3600
+# Left by earlier versions, which relayed the deployment CA to the exam app
+# for its own TLS inside the tunnel; removed at start (main()).
+OLD_SERVER_CA_FILE = Path("/etc/pie/server-ca.json")
 
 SESSION_CHECK_SECONDS = 30
 # How often the loop looks for a session tapped since the last check, so the
@@ -157,14 +148,6 @@ class DeviceIdentityHandler(BaseHTTPRequestHandler):
             self._respond(503, {"error": "tunnel to the server not set up yet"})
             return
         identity["apiBaseUrl"] = tunnel["apiUrl"]
-
-        ca_cert = current_server_ca(config) or refresh_server_ca(throttle=True)
-        if not ca_cert:
-            # DevApp-main can't reach the server without it; it retries
-            # like it does for "unclaimed".
-            self._respond(503, {"error": "server CA not fetched yet"})
-            return
-        identity["caCert"] = ca_cert
 
         self._respond(200, identity)
 
@@ -268,64 +251,6 @@ def write_filter(allowed_links: list, nmec: str):
     print(f"Filter updated: {len(allowed_links)} allowed links, assigned NMEC {nmec or '(none)'}.")
 
 
-def current_server_ca(config: dict, max_age: float | None = None) -> str | None:
-    """The cached CA, if it was fetched for this apiBaseUrl (and, with
-    max_age, recently enough)."""
-    try:
-        cached = json.loads(SERVER_CA_FILE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if cached.get("apiBaseUrl") != config.get("apiBaseUrl"):
-        return None
-    if max_age is not None and time.time() - float(cached.get("fetchedAt", 0)) > max_age:
-        return None
-    return cached.get("caCert") or None
-
-
-_ca_lock = threading.Lock()
-_ca_last_failure = 0.0
-# DevApp-main polls /device-identity every few seconds; while the server is
-# unreachable, don't start a fetch (up to 5 s) on every one of those polls.
-CA_RETRY_SECONDS = 10
-
-
-def refresh_server_ca(throttle: bool = False) -> str | None:
-    """Fetches the deployment CA from the server's device port and caches
-    it. Returns it, or None if it couldn't be fetched (the cache is kept)."""
-    global _ca_last_failure
-    with _ca_lock:
-        if throttle and time.monotonic() - _ca_last_failure < CA_RETRY_SECONDS:
-            return None
-        try:
-            config = json.loads(DEVICE_CONFIG_FILE.read_text(encoding="utf-8"))
-            device_id = int(config["deviceId"])
-            # TLS-PSK (pie_tls.py): only the server holding this device's
-            # key completes the handshake, which is what makes this CA
-            # trustworthy for the exam app.
-            url = f"{device_api_url(config['apiBaseUrl'])}/device/{device_id}/server-ca"
-            request = urllib.request.Request(url, headers={"X-Device-Key": config["deviceApiKey"]})
-            context = device_tls_context(device_id, config["deviceApiKey"])
-            with urllib.request.urlopen(request, timeout=5, context=context) as response:
-                ca_cert = json.loads(response.read().decode("utf-8"))["caCert"]
-            ssl.PEM_cert_to_DER_cert(ca_cert)  # rejects anything that isn't one PEM certificate
-        except (OSError, ValueError, KeyError, TypeError, RuntimeError, urllib.error.URLError) as exc:
-            print(f"Server CA fetch failed: {exc}")
-            _ca_last_failure = time.monotonic()
-            return None
-
-        if ca_cert != current_server_ca(config):
-            print(f"Server CA fetched for {config['apiBaseUrl']}.")
-        tmp_path = SERVER_CA_FILE.with_suffix(".tmp")
-        tmp_path.write_text(json.dumps({
-            "apiBaseUrl": config["apiBaseUrl"],
-            "caCert": ca_cert,
-            "fetchedAt": int(time.time()),
-        }) + "\n", encoding="utf-8")
-        os.chmod(tmp_path, 0o644)
-        tmp_path.replace(SERVER_CA_FILE)
-        return ca_cert
-
-
 def current_tunnel(config: dict, max_age: float | None = None) -> dict | None:
     """The tunnel record, if it was set up for this apiBaseUrl (and, with
     max_age, recently enough) and wg0 is up."""
@@ -334,6 +259,10 @@ def current_tunnel(config: dict, max_age: float | None = None) -> dict | None:
     except (OSError, ValueError):
         return None
     if tunnel.get("apiBaseUrl") != config.get("apiBaseUrl"):
+        return None
+    # A record from before the API inside the tunnel was plain HTTP is
+    # registered again, so the exam app gets the current address.
+    if not str(tunnel.get("apiUrl", "")).startswith("http://"):
         return None
     if max_age is not None and time.time() - float(tunnel.get("registeredAt", 0)) > max_age:
         return None
@@ -402,7 +331,7 @@ def ensure_tunnel(throttle: bool = False) -> dict | None:
             server_key = _wireguard_key(answer["serverPublicKey"])
             port = int(answer["endpointPort"])
             api_url = str(answer["apiUrl"])
-            if not 0 < port < 65536 or not api_url.startswith(f"https://{server_ip}:"):
+            if not 0 < port < 65536 or not api_url.startswith(f"http://{server_ip}:"):
                 raise ValueError("unexpected tunnel answer")
             host = urlsplit(config["apiBaseUrl"]).hostname or ""
             if ":" in host:
@@ -476,14 +405,13 @@ def session_expiry_loop():
                     config = json.loads(DEVICE_CONFIG_FILE.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     config = None
-                if config and not current_server_ca(config, max_age=SERVER_CA_REFRESH_SECONDS):
-                    refresh_server_ca()
                 if config and not current_tunnel(config, max_age=TUNNEL_REFRESH_SECONDS):
                     ensure_tunnel()
         time.sleep(LOOP_SECONDS)
 
 
 def main():
+    OLD_SERVER_CA_FILE.unlink(missing_ok=True)
     threading.Thread(target=session_expiry_loop, daemon=True).start()
     server = ThreadingHTTPServer((BIND_HOST, BIND_PORT), DeviceIdentityHandler)
     print(f"Serving device identity on {BIND_HOST}:{BIND_PORT}...")

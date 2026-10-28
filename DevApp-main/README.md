@@ -5,8 +5,8 @@ inside the exam OS, which the laptop boots from its PIE device, as the
 system service `devapp.service` (user `student`). It covers the exam from
 the examiner's tap to submission:
 
-1. **Waits for the device.** It gets the device's identity, the server's
-   address and the deployment's CA from the PIE device over the USB link
+1. **Waits for the device.** It gets the device's identity and the
+   server's address from the PIE device over the USB link
    (`GET http://192.168.7.2:8100/device-identity`). Until the device has been
    registered, it shows "Dispositivo não provisionado".
 2. **Waits for the examiner.** The examiner checks the student's card and
@@ -40,13 +40,13 @@ The UI is in Portuguese.
 
 ## Security
 
-- **API calls** go to the address the PIE device relayed, over HTTPS only.
-  Trust is limited to the deployment's CA, which the device also relays
-  (`SecurityContext(withTrustedRoots: false)`, `Config.api`). Public CAs are
-  not trusted, and there is no plain-HTTP fallback.
-  See `pie-api-main/README.md`, "How the exam app trusts the server".
+- **API calls** go to the address the PIE device relayed: the server's
+  address inside the device's WireGuard tunnel (`http://10.77.0.1:8001`).
+  They are plain HTTP, since the tunnel already encrypts and authenticates
+  them, and the server knows the device by it. See `pie-api-main/README.md`,
+  "Device tunnels".
 - **Nothing deployment-specific is built in.** The device ID, the server
-  address, the CA and the session are fetched at every boot and kept in
+  address and the session are fetched at every boot and kept in
   memory only. The exam OS is a live system with no persistence.
 
 ## Configuration

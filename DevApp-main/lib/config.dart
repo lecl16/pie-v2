@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
-import 'package:http/io_client.dart';
 
 class Config {
   // This device (an x86 host booted live from the amd64 image the attached
@@ -17,12 +16,9 @@ class Config {
   // (pie-api-main/docs/examiner-trusted-node-provisioning.md) — the examiner
   // app delivers it to the Pi over NFC and the Pi relays it here.
   String? _apiBaseUrl;
-  // The deployment's CA, relayed by the Pi with `apiBaseUrl` (the Pi fetched
-  // it from the server over its TLS-PSK link, see
-  // pie-api-main/docs/exam-app-tls.md). The only trust anchor for API
-  // connections: public CAs are not trusted for them.
-  String? _caCert;
-  SecurityContext? _apiSecurityContext;
+  // Plain HTTP: `apiBaseUrl` is the server's address inside the Pi's
+  // WireGuard tunnel, which already encrypts and authenticates the traffic,
+  // and is how the server knows this device.
   http.Client? _apiClient;
   // The session the Pi was provisioned for by the examiner's last confirmed
   // NFC tap, and the student the examiner assigned to this device. In
@@ -125,8 +121,8 @@ class Config {
         _instance!._apiClient != null;
   }
 
-  /// The HTTP client for every API call: TLS verified against the
-  /// deployment CA only. Check Config.isProvisioned first.
+  /// The HTTP client for every API call, to the server inside the Pi's
+  /// tunnel. Check Config.isProvisioned first.
   static http.Client get api {
     if (_instance == null) {
       throw Exception('Config not loaded. Call Config.load() first.');
@@ -134,35 +130,27 @@ class Config {
     final client = _instance!._apiClient;
     if (client == null) {
       throw Exception(
-        'Device not yet provisioned: no server CA fetched from the Pi yet. '
+        'Device not yet provisioned: no server address fetched from the Pi yet. '
         'Check Config.isProvisioned before calling the API.',
       );
     }
     return client;
   }
 
-  /// A separate client with the same trust, for a caller that closes it
-  /// (e.g. a long-lived stream), so closing it doesn't affect Config.api.
+  /// A separate client, for a caller that closes it (e.g. a long-lived
+  /// stream), so closing it doesn't affect Config.api.
   static http.Client newApiClient() {
-    final context = _instance?._apiSecurityContext;
-    if (context == null) {
+    if (_instance?._apiClient == null) {
       throw Exception(
-        'Device not yet provisioned: no server CA fetched from the Pi yet. '
+        'Device not yet provisioned: no server address fetched from the Pi yet. '
         'Check Config.isProvisioned before calling the API.',
       );
     }
-    return IOClient(HttpClient(context: context));
-  }
-
-  static SecurityContext _contextFor(String caPem) {
-    // withTrustedRoots: false — only this deployment's CA, never a public
-    // one, can vouch for the API server.
-    return SecurityContext(withTrustedRoots: false)
-      ..setTrustedCertificatesBytes(utf8.encode(caPem));
+    return http.Client();
   }
 
   /// Asks the attached Pi's device_identity_server.py for this device's
-  /// `deviceId`, the API server's `apiBaseUrl` and its CA, over `piIdentityUrl` (the
+  /// `deviceId` and the API server's `apiBaseUrl`, over `piIdentityUrl` (the
   /// usb0 link — see device-build/README.md's "Architecture" section for why
   /// this can't just be a local file read: this app's own root is wiped
   /// every reboot, the Pi is the only side that actually persists them).
@@ -180,28 +168,15 @@ class Config {
           .get(Uri.parse('${_instance!._piIdentityUrl}/device-identity'))
           .timeout(const Duration(seconds: 3));
       if (response.statusCode != 200) {
-        // Most commonly 404 "unclaimed", or 503 while the Pi hasn't fetched
-        // the server's CA yet — not an error, just not yet.
+        // Most commonly 404 "unclaimed", or 503 while the Pi hasn't set up
+        // its tunnel yet — not an error, just not yet.
         return;
       }
       final json = jsonDecode(response.body);
       final id = json['deviceId'];
       final url = json['apiBaseUrl'];
-      final caCert = json['caCert'];
-      if (id is int &&
-          url is String &&
-          url.startsWith('https://') &&
-          caCert is String &&
-          caCert.isNotEmpty) {
-        if (caCert != _instance!._caCert) {
-          // Throws on anything that isn't a valid certificate: the old
-          // client, if any, stays in place.
-          final context = _contextFor(caCert);
-          _instance!._apiClient?.close();
-          _instance!._apiSecurityContext = context;
-          _instance!._apiClient = IOClient(HttpClient(context: context));
-          _instance!._caCert = caCert;
-        }
+      if (id is int && url is String && url.startsWith('http://')) {
+        _instance!._apiClient ??= http.Client();
         _instance!._deviceId = id;
         _instance!._apiBaseUrl = url.endsWith('/') ? url.substring(0, url.length - 1) : url;
       }

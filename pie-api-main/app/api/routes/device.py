@@ -233,22 +233,6 @@ def provisioned_session_status(
         links.append(exam_session.exam_link)
     return {"active": True, "allowedLinks": links, "nmec": str(secret_row.nmec or "")}
 
-@router.get("/{device_id}/server-ca")
-def server_ca(device_id: int, device: Device = Depends(get_device)):
-    """This deployment's CA certificate (PEM), which the Pi relays to the exam
-    app so it can verify this server's certificate (docs/exam-app-tls.md).
-    The Pi fetches it only over its TLS-PSK port, so it comes from the
-    server that holds this device's key. The CA is public; X-Device-Key only
-    keeps the route to registered devices, like the status route."""
-    if device.id != device_id:
-        raise HTTPException(status_code=403, detail="Not this device")
-    try:
-        with open(config.SERVER_CA_CERT_PATH, encoding="ascii") as ca_file:
-            pem = ca_file.read()
-    except OSError:
-        raise HTTPException(status_code=503, detail="Server CA not configured")
-    return {"caCert": pem}
-
 @router.post("/{device_id}/tunnel", response_model=DeviceTunnel)
 def register_tunnel(
     device_id: int,
@@ -279,5 +263,6 @@ def register_tunnel(
         serverAddress=config.TUNNEL_SERVER_IP,
         serverPublicKey=server_key,
         endpointPort=config.TUNNEL_PORT,
-        apiUrl=f"https://{config.TUNNEL_SERVER_IP}:{config.TUNNEL_API_PORT}",
+        # Plain HTTP inside the tunnel, which already protects the traffic.
+        apiUrl=f"http://{config.TUNNEL_SERVER_IP}:{config.TUNNEL_API_PORT}",
     )

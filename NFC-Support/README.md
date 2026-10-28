@@ -24,10 +24,7 @@ for the full setup of a device. They need **Python 3.13 or later**
    server's address and, if set in the app, the exam room's Wi-Fi. The
    reader saves them, joins that network, and restarts into the normal
    loop. See `pie-api-main/README.md`, "Registering a PIE device".
-2. **CA.** `device_identity_server.py` fetches the deployment's CA from the
-   server over TLS-PSK and caches it in `/etc/pie/server-ca.json`. It
-   refetches every hour, and whenever the server's address changes.
-   **Tunnel.** It also creates the device's WireGuard key (the private key
+2. **Tunnel.** `device_identity_server.py` creates the device's WireGuard key (the private key
    never leaves the device), registers the public key with the server over
    TLS-PSK (`POST /device/{d}/tunnel`), and brings up `wg0` with the
    server's answer. Only traffic to the server's tunnel address
@@ -48,8 +45,9 @@ for the full setup of a device. They need **Python 3.13 or later**
    `pie-api-main/README.md`, "Session provisioning".
 4. **Exam laptop.** The exam app polls this device over the USB link:
    - `GET /device-identity`: device ID, the server's address **inside the
-     tunnel** (`https://10.77.0.1:8001`) and the CA. Answers 404 until the
-     device is registered, and 503 until the CA and the tunnel are ready.
+     tunnel** (`http://10.77.0.1:8001`; the tunnel protects the traffic).
+     Answers 404 until the device is registered, and 503 until the tunnel
+     is ready.
      The exam app reaches the server only through this device, which is how
      the server knows the device behind its requests.
    - `GET /session`: the provisioned session, the assigned student (number
@@ -65,7 +63,6 @@ for the full setup of a device. They need **Python 3.13 or later**
 |---|---|---|
 | `/etc/pie/device.json` | `deviceId`, `deviceApiKey`, `apiBaseUrl` | 0600 |
 | `/etc/pie/session.json` | The provisioned session, its secret and the assigned student | 0600 |
-| `/etc/pie/server-ca.json` | The deployment's CA, and the `apiBaseUrl` it was fetched for | 0644 |
 | `/etc/pie/wg.key` | The device's WireGuard private key; never leaves the device | 0600 |
 | `/etc/wireguard/wg0.conf` | The tunnel to the server (`wg-quick@wg0`), written by the identity service | 0600 |
 | `/etc/pie/tunnel.json` | The tunnel's address, the API's address inside it, and the `apiBaseUrl` it was set up for | 0644 |

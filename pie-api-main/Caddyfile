@@ -31,10 +31,11 @@
 
 # The exam apps behind the PIE devices, reached only through the devices'
 # WireGuard tunnels (the `wireguard` service; this port is not published).
-# Caddy passes the client's tunnel address, which identifies the device
-# (app/core/tunnel.py), replacing anything the client sent.
-:8001 {
-	tls /certs/server.crt /certs/server.key
+# Plain HTTP: the tunnel already encrypts and authenticates the traffic, and
+# identifies the device. Caddy passes the client's tunnel address, which
+# identifies the device (app/core/tunnel.py), replacing anything the client
+# sent.
+http://:8001 {
 	request_header -X-Pie-Phone-Cert-Fingerprint
 	request_header X-Pie-Tunnel-IP {http.request.remote.host}
 	import api

@@ -82,13 +82,13 @@ unplugged (see `device-build/README.md`, "Operations").
 - **Provisioning.** The examiner's phone is the trusted node. Each tap is
   encrypted (ECDH P-256 and AES-256-GCM, to a fresh key per tap). The device
   only accepts a session after confirming it with the server by mutual HMAC.
-- **Transport.** All three links use TLS:
-  - phone and browser to server (API and dashboard): a certificate from the
-    deployment's private CA; phones also present a client certificate, one
-    per phone;
+- **Transport.**
+  - phone and browser to server (API and dashboard): TLS, with a certificate
+    from the deployment's private CA; phones also present a client
+    certificate, one per phone;
   - device to server: TLS with a per-device pre-shared key;
-  - exam app to server: trusts only the deployment's CA, which the device
-    relays.
+  - exam app to server: plain HTTP inside the device's WireGuard tunnel,
+    which encrypts and authenticates it.
 - **Join.** The exam app reaches the server only through the PIE device's
   WireGuard tunnel; the server accepts a join only through the tunnel of a
   device the examiner tapped, for the student assigned to it.

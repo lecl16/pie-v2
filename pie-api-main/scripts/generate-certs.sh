@@ -16,8 +16,7 @@
 # Usage:
 #   ./scripts/generate-certs.sh                 # this machine's addresses
 #   ./scripts/generate-certs.sh 192.168.1.50 pie.example.org
-# localhost and 127.0.0.1 are always included, for the dashboard, and the
-# tunnel address 10.77.0.1, for the exam apps.
+# localhost and 127.0.0.1 are always included, for the dashboard.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,9 +53,7 @@ if [[ ${#hosts[@]} -eq 0 ]]; then
     [[ "$ip" == *.*.*.* ]] && hosts+=("$ip")
   done
 fi
-# Also the server's address inside the devices' tunnels (TUNNEL_SERVER_IP),
-# where the exam apps reach it.
-hosts+=(localhost 127.0.0.1 "${TUNNEL_SERVER_IP:-10.77.0.1}")
+hosts+=(localhost 127.0.0.1)
 
 san=""
 for host in "${hosts[@]}"; do

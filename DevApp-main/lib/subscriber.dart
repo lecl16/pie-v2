@@ -125,7 +125,7 @@ class Subscriber {
   }
 
   void _startListening(String url) async {
-    // Its own client (closed when the stream ends), with the API's trust.
+    // Its own client (closed when the stream ends).
     var client = Config.newApiClient();
     var request = http.Request('GET', Uri.parse(url))
       ..headers.addAll({
