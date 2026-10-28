@@ -98,8 +98,13 @@ needed for TLS-PSK).
 
 1. **Flash the card** with [Raspberry Pi Imager](https://www.raspberrypi.com/software/):
    Raspberry Pi Zero 2 W, Raspberry Pi OS (64-bit). In the customisation
-   settings, create the user `pie` with a strong password. The setup script
+   settings, create the user `pie` with a strong password (it is only used
+   on the device's own console: SSH accepts no passwords). The setup script
    below enables SSH and configures the Wi-Fi.
+
+   You also need an SSH key on your PC, the only way into the device over
+   SSH. If you don't have one: `ssh-keygen -t ed25519` (it creates
+   `~/.ssh/id_ed25519.pub`). Use the same key for every device.
 2. **Make room for the image.** Before the first boot, grow the `rootfs`
    partition with a partition editor (for example GParted) to fit the ISO
    (about 3 GB) plus some margin.
@@ -114,7 +119,7 @@ needed for TLS-PSK).
    - `config.txt` enables I²C at 10 kHz (see "Notes").
 4. **Configure the network and the firewall:**
    ```bash
-   sudo bash aux-files/apply-pi-gateway-setup.sh /media/$USER/rootfs /media/$USER/bootfs "<exam Wi-Fi SSID>" "<Wi-Fi password>"
+   sudo bash aux-files/apply-pi-gateway-setup.sh /media/$USER/rootfs /media/$USER/bootfs "<exam Wi-Fi SSID>" "<Wi-Fi password>" ~/.ssh/id_ed25519.pub
    ```
    This writes:
    - the initial Wi-Fi connection (`ExamWiFi`) and the `usb0` address
@@ -122,7 +127,12 @@ needed for TLS-PSK).
      (see `NFC-Support/README.md`);
    - IP forwarding;
    - the DNS forwarder for the laptop (dnsmasq on `usb0`);
-   - the nftables rules (below).
+   - the nftables rules (below);
+   - SSH with your key only: the key in `/etc/ssh/authorized_keys/pie`, and
+     `/etc/ssh/sshd_config.d/10-pie.conf` turning passwords and root logins
+     off. With the firewall, SSH is only reachable from the Wi-Fi.
+
+   The script refuses to run without a valid public key.
 
    It also installs dnsmasq, nftables, the SSH server and `wireguard-tools`
    (the tunnel to the server), and enables them.
@@ -216,9 +226,9 @@ table inet filter {
         iifname "wlan0" udp sport 547 udp dport 546 accept
         iifname "wlan0" udp dport 5353 accept
 
-        # SSH for administration, on both interfaces as before; restricting
-        # it is a separate, pending decision.
-        tcp dport 22 accept
+        # SSH, for the device's administration: from the Wi-Fi only, never
+        # from the exam host on the USB link.
+        iifname "wlan0" tcp dport 22 accept
     }
 
     # Only the exam host's traffic to the server is forwarded, through the
@@ -305,3 +315,27 @@ If it happens often, check the wiring and the power supply.
 | System | Account | Notes |
 |---|---|---|
 | Exam OS | `student` / `pie` | Logged in automatically. Gives no rights beyond the student's own session |
+| Pi | `pie` / set in Imager | Administers the device; has sudo. The password only works on the device's console; SSH takes the administrator's key only, from the Wi-Fi |
+
+## Notes
+
+- **I²C.** `config.txt` needs only:
+  ```
+  dtparam=i2c_arm=on
+  dtparam=i2c_arm_baudrate=10000
+  ```
+  - **Why 10 kHz:** the PN532 stretches the I²C clock, which the Pi's
+    controller handles badly at the default 100 kHz.
+  - **No kernel NFC driver:** do not add `dtoverlay=pn532-i2c` or load the
+    kernel's `nfc`/`pn532`/`pn532_i2c` modules. They take the chip away from
+    the reader (`OSError: [Errno 19] No such device`).
+  - **To check:** `lsmod | grep pn532` should show nothing, and
+    `i2cdetect -y 1` should show `24`, not `UU`.
+- **Why `reader_script.py` doesn't use `nfcpy`:** it drives the PN532 over
+  I²C with `adafruit-circuitpython-pn532`. `nfcpy` has no I²C transport.
+- **The device's state is kept on the Pi**: `/etc/pie/device.json`,
+  `session.json` and the tunnel's files. The exam OS keeps nothing between
+  boots. See `NFC-Support/README.md`.
+- **`aux-files/usb-host-net.*` and `999-enable-usb-host-net.hook.chroot`**
+  are from an earlier NetworkManager-based setup of the laptop's side and
+  are not used by the image.

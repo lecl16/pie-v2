@@ -5,9 +5,19 @@ ROOTFS="${1:-/media/<user>/rootfs}"
 BOOTFS="${2:-/media/<user>/bootfs}"
 SSID="${3:-Exam Wifi}"
 PSK="${4:-abc}"
+# The administrator's SSH public key (e.g. ~/.ssh/id_ed25519.pub): the only
+# way into the device over SSH, which accepts no passwords.
+ADMIN_KEY="${5:-}"
 
-if [[ ! -d "$ROOTFS" || ! -d "$BOOTFS" ]]; then
-  echo "Usage: $0 <rootfs> <bootfs> [ssid] [psk]" >&2
+if [[ ! -d "$ROOTFS" || ! -d "$BOOTFS" || -z "$ADMIN_KEY" ]]; then
+  echo "Usage: $0 <rootfs> <bootfs> <ssid> <psk> <admin SSH public key file>" >&2
+  exit 2
+fi
+# Refuse anything that isn't a single public key, so a device never ends up
+# with SSH enabled and no way in.
+if [[ ! -f "$ADMIN_KEY" ]] || [[ "$(grep -c . "$ADMIN_KEY")" -ne 1 ]] \
+    || ! ssh-keygen -l -f "$ADMIN_KEY" >/dev/null 2>&1 || grep -q PRIVATE "$ADMIN_KEY"; then
+  echo "Not a single SSH public key: $ADMIN_KEY (create one with ssh-keygen -t ed25519)" >&2
   exit 2
 fi
 
@@ -103,9 +113,9 @@ table inet filter {
         iifname "wlan0" udp sport 547 udp dport 546 accept
         iifname "wlan0" udp dport 5353 accept
 
-        # SSH for administration, on both interfaces as before; restricting
-        # it is a separate, pending decision.
-        tcp dport 22 accept
+        # SSH, for the device's administration: from the Wi-Fi only, never
+        # from the exam host on the USB link.
+        iifname "wlan0" tcp dport 22 accept
     }
 
     # Only the exam host's traffic to the server is forwarded, through the
@@ -152,6 +162,21 @@ chroot "$ROOTFS" apt install -y dnsmasq nftables openssh-server wireguard-tools
 chroot "$ROOTFS" systemctl enable NetworkManager dnsmasq nftables ssh
 
 touch "$BOOTFS/ssh"
+
+# SSH with the administrator's key only (the firewall above already limits
+# it to the Wi-Fi). The key lives outside the home directory, which only
+# exists once the user is created on the first boot. sshd takes the first
+# value it reads, and this file comes before the one Raspberry Pi Imager's
+# settings may add (50-cloud-init.conf, which can allow passwords).
+install -d -m 0755 "$ROOTFS/etc/ssh/authorized_keys"
+install -m 0644 "$ADMIN_KEY" "$ROOTFS/etc/ssh/authorized_keys/pie"
+install -d -m 0755 "$ROOTFS/etc/ssh/sshd_config.d"
+cat >"$ROOTFS/etc/ssh/sshd_config.d/10-pie.conf" <<'EOF'
+AuthorizedKeysFile /etc/ssh/authorized_keys/%u
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+EOF
 
 umount "$ROOTFS/dev/pts" "$ROOTFS/dev" "$ROOTFS/sys" "$ROOTFS/proc"
 
