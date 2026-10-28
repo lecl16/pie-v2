@@ -224,8 +224,9 @@ Optional, with defaults that match `generate-certs.sh` and the compose file:
 |---|---|
 | Public | `POST /users/login` |
 | Device (key or HMAC proof, no JWT) | `POST /device/{d}/provisioning-secret/{s}/confirm`, `GET /device/{d}/session/{s}/status`, `POST /device/{d}/tunnel` |
-| Authenticated | Sessions, session users, submissions, devices (read), logs, screen-share, `/pie` |
-| Teacher or admin | Courses, exams, analytics, `/examiner-phone/*`, `POST /device/create`, `POST /device/{d}/rotate-key`, `DELETE /device/{d}` |
+| Authenticated | Sessions, session users, submissions, devices (read), screen-share, `/pie` |
+| The student themself, through the device they joined on | Writing activity logs (`POST /logs/session/{s}/user/{nmec}`): the student comes from the token, the device from the tunnel, the session must be the one they joined on that device |
+| Teacher or admin | Courses, exams, analytics, reading activity logs (every `GET /logs/...`, including the live stream), writing logs for a device (`POST /logs/device/{d}`, `POST /logs/session/{s}/device/{d}`), `/examiner-phone/*`, `POST /device/create`, `POST /device/{d}/rotate-key`, `DELETE /device/{d}` |
 | Teacher or admin, from an enrolled phone | Device creation, provisioning-secret registration and removal, the examiner app's session and student lists |
 | Admin | `POST /users/create` |
 
