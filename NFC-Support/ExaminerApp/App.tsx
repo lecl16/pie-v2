@@ -518,7 +518,7 @@ function AppContent(): React.JSX.Element {
       setStatus(
         `Secure provisioning active for device ${deviceId.trim()} (session ${sessionId.trim()}, ` +
           `student ${studentNmec.trim()}). ` +
-          `Arm the device's reader and tap within ${SECRET_TTL_SECONDS / 60} minutes.`,
+          `Tap the device within ${SECRET_TTL_SECONDS / 60} minutes.`,
       );
     } catch (err) {
       Alert.alert('Registration failed', err instanceof Error ? err.message : String(err));
@@ -754,9 +754,8 @@ function AppContent(): React.JSX.Element {
         <View style={styles.card}>
           <Text style={styles.infoTitle}>Provision New Device</Text>
           <Text style={styles.infoText}>
-            Mints a device identity and holds it here until you tap the phone
-            against a freshly-flashed, unclaimed device — see
-            device-identity-nfc-bootstrap.md.
+            Creates a device identity and holds it here until you tap the
+            phone on a new, unregistered device.
           </Text>
 
           <Text style={styles.label}>Device Name</Text>
