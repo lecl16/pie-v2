@@ -28,6 +28,10 @@ class Exam extends StatefulWidget {
   final bool isAlreadyDownloaded;
   final String encryptionKey;
   final String exam;
+  // Rejoining a session that has already started (after a restart of the
+  // exam host): there is no start_exam message to wait for, and duration is
+  // the time the server says is left.
+  final bool resume;
 
   const Exam({
     super.key,
@@ -40,6 +44,7 @@ class Exam extends StatefulWidget {
     required this.isAlreadyDownloaded,
     required this.encryptionKey,
     required this.exam,
+    this.resume = false,
   });
 
   @override
@@ -60,7 +65,9 @@ class _ExamState extends State<Exam> {
   void initState() {
     _examDuration = Duration(seconds: widget.duration);
     super.initState();
-    if (widget.exam == 'files') {
+    if (widget.resume) {
+      _resumeExam();
+    } else if (widget.exam == 'files') {
       if (!widget.isAlreadyDownloaded) {
         _downloadExam();
       } else {
@@ -149,6 +156,41 @@ class _ExamState extends State<Exam> {
         _downloadFailed = true;
       });
     }
+  }
+
+  // The start_exam message, which carries the key, is sent only once, so
+  // after a rejoin the app fetches the exam and its key and starts at once.
+  Future<void> _resumeExam() async {
+    if (widget.exam == 'files') {
+      await _downloadExam();
+      if (_downloadFailed) return;
+    }
+    final key = await _fetchKey();
+    if (key != null) _startExam(key);
+  }
+
+  Future<String?> _fetchKey() async {
+    try {
+      var response = await Config.api.get(
+        Uri.parse('${Config.apiBaseUrl}/course/${widget.courseID}/${widget.examID}/${widget.sessionID}/key'),
+        headers: {
+          'Authorization': 'Bearer ${Config.getFromConfigMap('token')}',
+        },
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body)['key'];
+      }
+      setState(() {
+        _statusMessage = 'Não foi possível obter a chave do exame: erro ${response.statusCode}';
+        _downloadFailed = true;
+      });
+    } catch (e) {
+      setState(() {
+        _statusMessage = 'Erro ao conectar ao servidor: $e';
+        _downloadFailed = true;
+      });
+    }
+    return null;
   }
 
   void _showNotifications() {
@@ -283,14 +325,18 @@ class _ExamState extends State<Exam> {
   }
 
   void _startExam(String key) async {
-    if (!widget.isAlreadyDownloaded && key != "" && widget.exam == 'files') {
+    // Records the student's start, from which the server counts the time
+    // left on a rejoin (it keeps the first one).
+    if (!widget.isAlreadyDownloaded) {
       Config.api.post(
         Uri.parse('${Config.apiBaseUrl}/submission/${widget.sessionUserID}/start'),
         headers: {
           'Authorization': 'Bearer ${Config.getFromConfigMap('token')}',
         },
       );
+    }
 
+    if (!widget.isAlreadyDownloaded && key != "" && widget.exam == 'files') {
       final keyBytes = Uint8List.fromList(base64Url.decode(key));
       try {
         final examDir = Directory(Config.examDirectory);
@@ -299,7 +345,9 @@ class _ExamState extends State<Exam> {
           _finishExam('Erro: Ficheiros do exame não encontrados');
           return;
         }
-        final examFile = examFiles.first.path;
+        final examFile = examFiles
+            .firstWhere((f) => f.path.endsWith('.encrypted'), orElse: () => examFiles.first)
+            .path;
         final fileData = await File(examFile).readAsBytes();
         final decryptedData = Encryption.decryptFile(fileData, keyBytes);
         final outputFile = examFile.replaceAll(RegExp(r'\.encrypted$'), '');
@@ -731,7 +779,7 @@ class _ExamState extends State<Exam> {
                       SizedBox(height: 20),
                       if (_downloadFailed)
                         ElevatedButton(
-                          onPressed: _downloadExam,
+                          onPressed: widget.resume ? _resumeExam : _downloadExam,
                           child: Text('Tentar novamente'),
                         ),
                     ],

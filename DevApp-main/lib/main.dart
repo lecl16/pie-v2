@@ -189,6 +189,12 @@ class _ExamHomePageState extends State<ExamHomePage> {
         examID = data['exam_id'];
         courseID = data['course_id'];
         duration = data['duration'];
+        // A rejoin after the exam has started: resume at once, with the
+        // time left (the full time if the student had not started yet).
+        bool resume = data['is_started'] == true;
+        if (resume && data['remaining_seconds'] != null) {
+          duration = data['remaining_seconds'];
+        }
         Config.addToConfigMap('sessionUserID', sessionUserID);
         Config.addToConfigMap('sessionID', sessionID);
         Config.addToConfigMap('examID', examID);
@@ -221,6 +227,7 @@ class _ExamHomePageState extends State<ExamHomePage> {
               isAlreadyDownloaded: false,
               encryptionKey: '',
               exam: exam,
+              resume: resume,
             ),
           ),
         );
