@@ -15,6 +15,7 @@ from app.models.db.device import Device
 from app.models.db.device_provisioning_secret import DeviceProvisioningSecret
 from app.models.db.examiner_phone import ExaminerPhone
 from app.models.db.session import Session as ExamSession
+from app.models.db.session_user import SessionUser
 from app.models.db.user import User
 from app.schemas.device import DeviceCreate, DeviceUpdate, DeviceOut, DeviceCreated, DeviceTunnel, DeviceTunnelRegister
 from app.schemas.device_provisioning_secret import (
@@ -91,9 +92,17 @@ def update_device(device_id: int, device: DeviceUpdate, db: Session = Depends(ge
 
 @router.delete("/{device_id}", response_model=DeviceOut)
 def delete_device(device_id: int, db: Session = Depends(get_db)):
+    """Removes a device that no student has joined a session on. A device
+    with exam history is kept, since that history records which device each
+    student took the exam on; to retire it, rotate its key instead."""
     device = db.query(Device).filter(Device.id == device_id).first()
     if device is None:
         raise HTTPException(status_code=404, detail="Device not found")
+    if db.query(SessionUser).filter(SessionUser.device_id == device_id).first() is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="The device has exam history and cannot be deleted; rotate its key to retire it",
+        )
     db.delete(device)
     db.commit()
     write_peers(db)
