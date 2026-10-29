@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response, Form, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -17,7 +17,8 @@ from app.schemas.device_provisioning_secret import (
     DeviceProvisioningSecretRegister,
     DeviceProvisioningSecretRegistered,
 )
-from app.core.auth import get_examiner_phone
+from app.core.auth import get_current_user, get_examiner_phone, get_teacher_or_admin_user
+from app.core.tunnel import own_join_through_tunnel
 from app.models.db.examiner_phone import ExaminerPhone
 import os
 import mimetypes
@@ -37,7 +38,7 @@ import base64
 logger = logging.getLogger("uvicorn.error")
 router = APIRouter()
 
-@router.post("/session-create", response_model=SessionOut)
+@router.post("/session-create", response_model=SessionOut, dependencies=[Depends(get_teacher_or_admin_user)])
 def create_session(course_id: str, exam_id: int, session: SessionCreate, db: Session = Depends(get_db)):
     course = db.query(dbCourse).filter(dbCourse.id == course_id).first()
     if not course:
@@ -89,19 +90,19 @@ def generate_join_code(db: Session, max_attempts=10):
         attempts += 1
     raise HTTPException(status_code=500, detail="Could not generate unique join code after multiple attempts")
 
-@router.get("/sessions", response_model=List[SessionOut])
+@router.get("/sessions", response_model=List[SessionOut], dependencies=[Depends(get_teacher_or_admin_user)])
 def read_sessions(course_id: str, exam_id: int, db: Session = Depends(get_db)):
     sessions = db.query(dbSession).filter(dbSession.course_id == course_id, dbSession.exam_id == exam_id).all()
     return sessions
 
-@router.get("/{session_id}", response_model=SessionOut)
+@router.get("/{session_id}", response_model=SessionOut, dependencies=[Depends(get_teacher_or_admin_user)])
 def read_session(course_id: str, exam_id: int, session_id: int, db: Session = Depends(get_db)):
     session = db.query(dbSession).filter(dbSession.id == session_id).first()
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
 
-@router.post("/{session_id}/upload", response_model=SessionOut)
+@router.post("/{session_id}/upload", response_model=SessionOut, dependencies=[Depends(get_teacher_or_admin_user)])
 async def upload_exam_files(
     course_id: str,
     exam_id: int,
@@ -231,8 +232,15 @@ def download_exam_file(
     course_id: str,
     exam_id: int,
     session_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # The encrypted exam: teachers and admins, or a student who joined this
+    # session on the device the request comes through (the key comes later).
+    if current_user.role not in ["admin", "teacher"] and \
+            own_join_through_tunnel(db, request, current_user, session_id=session_id) is None:
+        raise HTTPException(status_code=403, detail="Not joined on this device")
     try:
         db_session = db.query(dbSession).filter(
             dbSession.id == session_id,
@@ -311,7 +319,7 @@ def download_exam_file(
             content={"detail": f"Server error: {str(e)}", "error_code": "SERVER_ERROR"}
         )
 
-@router.put("/{session_id}", response_model=SessionOut)
+@router.put("/{session_id}", response_model=SessionOut, dependencies=[Depends(get_teacher_or_admin_user)])
 async def update_session(
     course_id: str,
     exam_id: int,
@@ -480,7 +488,7 @@ async def update_session(
         logger.error(f"Database error: {str(e)}")
         raise HTTPException(status_code=500, detail="Error updating session")
 
-@router.delete("/{session_id}", response_model=SessionOut)
+@router.delete("/{session_id}", response_model=SessionOut, dependencies=[Depends(get_teacher_or_admin_user)])
 def delete_session(course_id: str, exam_id: int, session_id: int, db: Session = Depends(get_db)):
     db_session = db.query(dbSession).filter(dbSession.id == session_id).first()
     if db_session is None:
@@ -489,7 +497,7 @@ def delete_session(course_id: str, exam_id: int, session_id: int, db: Session = 
     db.commit()
     return Response(status_code=204)
 
-@router.get("/{session_id}/submissions", response_model=List[SubmissionOut])
+@router.get("/{session_id}/submissions", response_model=List[SubmissionOut], dependencies=[Depends(get_teacher_or_admin_user)])
 def read_submissions(course_id: str, exam_id: int, session_id: int, db: Session = Depends(get_db)):
     session = db.query(dbSession).filter(dbSession.id == session_id).first()
     if session is None:
@@ -501,7 +509,7 @@ def read_submissions(course_id: str, exam_id: int, session_id: int, db: Session 
     submissions = db.query(Submission).filter(Submission.session_user_id.in_(session_user_ids)).all()
     return submissions
 
-@router.get("/{session_id}/get-submissions", response_class=FileResponse)
+@router.get("/{session_id}/get-submissions", response_class=FileResponse, dependencies=[Depends(get_teacher_or_admin_user)])
 def download_submissions(
     course_id: str,
     exam_id: int,
@@ -651,7 +659,7 @@ def download_submissions(
         logger.error(f"Unexpected error in download_submissions: {str(e)}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred")
 
-@router.post("/{session_id}/start", response_model=SessionOut)
+@router.post("/{session_id}/start", response_model=SessionOut, dependencies=[Depends(get_teacher_or_admin_user)])
 async def start_session(
     course_id: str,
     exam_id: int,
@@ -699,10 +707,16 @@ def get_decryption_key(
     course_id: str,
     exam_id: int,
     session_id: int,
-    #user_nmec: int,
+    request: Request,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Verify the session
+    """The exam's decryption key, which the exam app needs when it rejoins
+    a session that has already started (the start_exam message is sent only
+    once). Only once the session has started, and only to a teacher or
+    admin, or to a student who joined this session on the device whose
+    tunnel the request arrives through: a student who has the encrypted
+    exam cannot read it before the start."""
     db_session = db.query(dbSession).filter(
         dbSession.id == session_id,
         dbSession.course_id == course_id,
@@ -712,24 +726,16 @@ def get_decryption_key(
     if db_session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Check if session has started
-    #if not db_session.is_started:
-    #    raise HTTPException(status_code=403, detail="Session has not started yet")
+    if current_user.role not in ["admin", "teacher"]:
+        if not db_session.is_started:
+            raise HTTPException(status_code=403, detail="Session has not started yet")
+        if own_join_through_tunnel(db, request, current_user, session_id=session_id) is None:
+            raise HTTPException(status_code=403, detail="Not joined on this device")
 
-    # Verify the user is enrolled in this session
-    #session_user = db.query(SessionUser).filter(
-    #    SessionUser.session_id == session_id,
-    #    SessionUser.user_nmec == user_nmec
-    #).first()
-
-    #if session_user is None:
-    #    raise HTTPException(status_code=403, detail="User is not enrolled in this session")
-
-    # Return the encryption key
     return {"key": db_session.encryption_key}
 
 
-@router.post("/{session_id}/end", response_model=SessionOut)
+@router.post("/{session_id}/end", response_model=SessionOut, dependencies=[Depends(get_teacher_or_admin_user)])
 async def end_session(
     course_id: str,
     exam_id: int,

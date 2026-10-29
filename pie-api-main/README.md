@@ -224,11 +224,11 @@ Optional, with defaults that match `generate-certs.sh` and the compose file:
 |---|---|
 | Public | `POST /users/login` |
 | Device (key or HMAC proof, no JWT) | `POST /device/{d}/provisioning-secret/{s}/confirm`, `GET /device/{d}/session/{s}/status`, `POST /device/{d}/tunnel` |
-| Authenticated | Sessions, session users, submissions, devices (read), screen-share, `/pie` |
-| The student themself, through the device they joined on | Writing activity logs (`POST /logs/session/{s}/user/{nmec}`): the student comes from the token, the device from the tunnel, the session must be the one they joined on that device |
-| Teacher or admin | Courses, exams, analytics, reading activity logs (every `GET /logs/...`, including the live stream), writing logs for a device (`POST /logs/device/{d}`, `POST /logs/session/{s}/device/{d}`), `/examiner-phone/*`, `POST /device/create`, `POST /device/{d}/rotate-key`, `DELETE /device/{d}` |
+| Authenticated | Devices (read), subscribing to `/pie` (a student only to their own channel, `GET /pie/{nmec}`), changing one's own password (`PUT /users/{nmec}/change-password`) |
+| The student themself, through the device they joined on | Writing activity logs (`POST /logs/session/{s}/user/{nmec}`): the student comes from the token, the device from the tunnel, the session must be the one they joined on that device. The exam's decryption key (`GET /course/{c}/{e}/{s}/key`), once the session has started; the encrypted exam (`GET /course/{c}/{e}/{s}/download`); their own submissions and the start and end of their attempt (`POST /submission/create`, `POST /submission/{id}/start`, `POST /submission/{id}/end`); sharing their own screen (`/screenshare/ws/client/{s}/{nmec}`, `POST /screenshare/offer`, `POST /screenshare/ice-candidate`) |
+| Teacher or admin | Reading users (`GET /users/...`), watching screens (`/screenshare/ws/monitor/{s}?token=...`, since a browser cannot set headers on a WebSocket), courses, exams, sessions (create, edit, upload, start, end, delete, submissions; also the exam and its key at any time), session users (including added time), reading submissions, publishing to `/pie`, analytics, reading activity logs (every `GET /logs/...`, including the live stream, which also takes `?token=...` for the same reason), writing logs for a device (`POST /logs/device/{d}`, `POST /logs/session/{s}/device/{d}`), `/examiner-phone/*`, `POST /device/create`, `POST /device/{d}/rotate-key`, `DELETE /device/{d}` |
 | Teacher or admin, from an enrolled phone | Device creation, provisioning-secret registration and removal, the examiner app's session and student lists |
-| Admin | `POST /users/create` |
+| Admin | `POST /users/create`, editing a user, including their role (`PUT /users/{nmec}`), deleting one (`DELETE /users/{nmec}`) |
 
 ## API overview
 
@@ -276,7 +276,7 @@ Full, current documentation: `/docs` (Swagger UI) and `/redoc`.
 
 ### Registering a PIE device
 
-1. In the examiner app ("Provision New Device"), the enrolled phone calls
+1. In the examiner app ("Register New Device"), the enrolled phone calls
    `POST /device/create`. The server creates the device and returns its ID
    and a new device API key. It stores only a hash of the key, and the
    device's TLS pre-shared key wrapped with `DEVICE_PSK_WRAP_KEY`.
@@ -286,12 +286,18 @@ Full, current documentation: `/docs` (Swagger UI) and `/redoc`.
 3. The device saves it (`/etc/pie/device.json`). From then on it talks to
    the server over the device port.
 
-`DELETE /device/{d}` removes a device. `POST /device/{d}/rotate-key` issues
-a new key, but no client delivers it to the device yet: the device stops
-reaching the server. To replace a device's key:
-1. delete the device;
-2. on the device, delete `/etc/pie/device.json` and restart `nfc-reader`;
-3. register it again with a tap.
+`DELETE /device/{d}` removes a device, but only one that no student has
+joined a session on: a device with exam history answers 409, since that
+history records which device each student used. `POST /device/{d}/rotate-key`
+issues a new key, clears the device's tunnel key, and keeps the device and
+its history; no client delivers the new key to the device yet, so the
+device stops reaching the server. To give a device a new identity (for
+example after an exam):
+1. retire the old one: `rotate-key` (or `DELETE`, if it has no history);
+2. on the device, delete `/etc/pie/device.json`, `session.json`,
+   `filter.json`, `tunnel.json`, `wg.key` and `/etc/wireguard/wg0.conf`,
+   stop `wg-quick@wg0`, and restart `pie-device-identity` and `nfc-reader`;
+3. register it again with a tap. It gets a new ID.
 
 ### Session provisioning
 
@@ -341,6 +347,14 @@ machine. Nothing secret leaves the device. A machine that was never tapped
 can't join. The
 exam app shows the assigned student's name and number before the join, so
 a student can call the examiner if the tap named someone else.
+
+The same student can join again from the same device, for example after
+the laptop restarts, until they finish or the session ends. If the exam has
+already started, the join says so (`is_started`) and gives the time left
+(`remaining_seconds`: the duration plus any added time, less the time since
+the student's first start, which a rejoin doesn't reset). The exam app then
+downloads the exam again, fetches its key, and resumes at once, since the
+start message is sent only once. Work since the last upload is lost.
 
 ### Phone enrollment
 
@@ -427,3 +441,18 @@ development only (see the Caddy note above).
 
 `app/testing/` has standalone HTML clients (`client.html`, `client_v2.html`)
 for trying the WebSocket and SSE endpoints without the dashboard.
+
+## Tests
+
+`tests/test_access.py` checks who may call which route, and from where: the
+join only through a device's tunnel, the student's token only from that
+tunnel, the exam's key only after the start, the rejoin's time left, and
+the routes that only teachers or administrators may use (sessions, users,
+activity logs and their live stream, screen sharing). It uses an in-memory
+SQLite database, so it needs neither MySQL nor Redis. From `pie-api-main/`,
+with the app image built:
+
+```bash
+docker run --rm -v "$PWD":/app -w /app --env-file .env \
+  -e PYTHONPATH=/app pie-api-main-app python -m unittest discover -s tests -v
+```

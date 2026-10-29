@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import config
 from app.models.db.device import Device
+from app.models.db.session_user import SessionUser
 
 # Set by Caddy on the tunnel site only; dropped on the other sites.
 TUNNEL_IP_HEADER = "X-Pie-Tunnel-IP"
@@ -83,3 +84,24 @@ def write_peers(db: Session):
     tmp_path.write_text("\n".join(lines), encoding="ascii")
     os.chmod(tmp_path, 0o644)
     tmp_path.replace(path)
+
+
+def own_join_through_tunnel(db: Session, request, user, session_id=None, session_user_id=None):
+    """The logged-in student's join, in that session (or with that id), on
+    the device whose tunnel the request arrives through; None for anyone
+    else, a request from outside the tunnels, or another device. What a
+    student's exam app may do is limited to its own join."""
+    if user is None or user.role != "student":
+        return None
+    device_id = device_id_for_tunnel_ip(request.headers.get(TUNNEL_IP_HEADER))
+    if device_id is None:
+        return None
+    query = db.query(SessionUser).filter(
+        SessionUser.user_nmec == user.nmec,
+        SessionUser.device_id == device_id,
+    )
+    if session_id is not None:
+        query = query.filter(SessionUser.session_id == session_id)
+    if session_user_id is not None:
+        query = query.filter(SessionUser.id == session_user_id)
+    return query.first()

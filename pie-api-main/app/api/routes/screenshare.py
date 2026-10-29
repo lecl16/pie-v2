@@ -1,4 +1,9 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, HTTPException, Request
+from sqlalchemy.orm import Session
+from app.core.auth import get_current_user, websocket_user
+from app.core.database import get_db
+from app.core.tunnel import own_join_through_tunnel
+from app.models.db.user import User
 from fastapi.responses import JSONResponse
 from app.services.pubsub_service import redis_pubsub
 import json
@@ -18,8 +23,24 @@ def get_client_channel(session_id: str, nmec: str) -> str:
 def get_monitor_channel(session_id: str) -> str:
     return f"screenshare:{session_id}:monitor"
 
+def _is_teacher(user) -> bool:
+    return user is not None and user.role in ["admin", "teacher"]
+
+def _is_joined_student(db, request, user, session_id, nmec) -> bool:
+    """The student themself, joined on the device the request comes through."""
+    try:
+        session_id, nmec = int(session_id), int(nmec)
+    except (TypeError, ValueError):
+        return False
+    return user is not None and user.nmec == nmec and \
+        own_join_through_tunnel(db, request, user, session_id=session_id) is not None
+
+# A student's own screen, from the device they joined on.
 @router.websocket("/ws/client/{session_id}/{nmec}")
-async def websocket_client_endpoint(websocket: WebSocket, session_id: str, nmec: str):
+async def websocket_client_endpoint(websocket: WebSocket, session_id: str, nmec: str, db: Session = Depends(get_db)):
+    if not _is_joined_student(db, websocket, websocket_user(websocket, db), session_id, nmec):
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     
     # Register this client
@@ -97,8 +118,12 @@ async def websocket_client_endpoint(websocket: WebSocket, session_id: str, nmec:
             "message": "Student disconnected"
         }))
 
+# Watching the students' screens: teachers and admins.
 @router.websocket("/ws/monitor/{session_id}")
-async def websocket_monitor_endpoint(websocket: WebSocket, session_id: str):
+async def websocket_monitor_endpoint(websocket: WebSocket, session_id: str, db: Session = Depends(get_db)):
+    if not _is_teacher(websocket_user(websocket, db)):
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     
     # Register this monitor
@@ -214,12 +239,20 @@ async def handle_redis_messages(pubsub, websocket):
 # REST endpoints to support legacy code and direct HTTP requests
 
 @router.post("/offer")
-async def receive_offer(data: Dict[str, Any]):
+async def receive_offer(
+    data: Dict[str, Any],
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     session_id = data.get("sessionId")
     nmec = data.get("nmec")
     
     if not session_id or not nmec:
         raise HTTPException(status_code=400, detail="sessionId and nmec are required")
+    # An offer is the student's screen: only from the student themself.
+    if not _is_joined_student(db, request, current_user, session_id, nmec):
+        raise HTTPException(status_code=403, detail="Not joined on this device")
     
     # Publish to monitor channel
     monitor_channel = get_monitor_channel(session_id)
@@ -233,13 +266,23 @@ async def receive_offer(data: Dict[str, Any]):
     return {"status": "success"}
 
 @router.post("/ice-candidate")
-async def receive_ice_candidate(data: Dict[str, Any]):
+async def receive_ice_candidate(
+    data: Dict[str, Any],
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     session_id = data.get("sessionId")
     nmec = data.get("nmec")
     source = data.get("source", "student")
     
     if not session_id:
         raise HTTPException(status_code=400, detail="sessionId is required")
+    # From the student themself, or from a teacher watching.
+    allowed = _is_joined_student(db, request, current_user, session_id, nmec) if source == "student" \
+        else _is_teacher(current_user)
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
     
     if source == "student":
         # Student to monitor

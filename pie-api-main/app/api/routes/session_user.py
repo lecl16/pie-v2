@@ -14,11 +14,23 @@ import base64
 from app.core.security import get_key_from_storage, verify_hmac
 from fastapi.responses import JSONResponse
 import logging
+from datetime import datetime
 
 router = APIRouter()
 # Public (no JWT): the exam app joins with the device's proof alone.
 join_router = APIRouter()
 logger = logging.getLogger("uvicorn.error")
+
+def _remaining_seconds(db_session_user: SessionUser, session: Session):
+    """Time left for a student who rejoins after the start: the session's
+    duration and any time the examiner added, less the time since the
+    student's own start (the same sum as the dashboard's countdown). None
+    if the student had not started yet, so the app counts the full time."""
+    if db_session_user.start_time is None:
+        return None
+    elapsed = (datetime.utcnow() - db_session_user.start_time).total_seconds()
+    total = (session.duration or 0) + (db_session_user.changed_time or 0)
+    return max(0, int(total - elapsed))
 
 def _join_response(db_session_user: SessionUser, session: Session) -> dict:
     return {
@@ -31,7 +43,12 @@ def _join_response(db_session_user: SessionUser, session: Session) -> dict:
         "duration": session.duration,
         "changed_time": getattr(db_session_user, 'changed_time', 0),
         "allowed_links": session.allowed_links,
-        "exam": session.exam_link if session.exam_link else "files"
+        "exam": session.exam_link if session.exam_link else "files",
+        # A rejoin after the start (a restart of the exam host): the app
+        # fetches the key and resumes at once, since the start_exam message
+        # is sent only once.
+        "is_started": bool(session.is_started),
+        "remaining_seconds": _remaining_seconds(db_session_user, session) if session.is_started else None,
     }
 
 def _joined(db_session_user: SessionUser, session: Session, student: User, tunnel_ip: str) -> dict:
@@ -192,6 +209,6 @@ def update_user_time(id: int, time_data: SessionUserTime, db: Session = Depends(
     db_session_user.exam_id = session.exam_id
     db_session_user.course_id = session.course_id
     db_session_user.duration = session.duration
-    session_user.exam = session.exam_link if session.exam_link else "files"
+    db_session_user.exam = session.exam_link if session.exam_link else "files"
     
     return db_session_user

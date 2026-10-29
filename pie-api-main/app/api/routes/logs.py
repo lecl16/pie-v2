@@ -3,7 +3,7 @@ from typing import List, Optional
 from datetime import datetime
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from app.core.auth import get_current_user, get_teacher_or_admin_user
+from app.core.auth import get_current_user, get_teacher_or_admin_user, get_teacher_or_admin_stream_user
 from app.core.database import get_db
 from app.core.tunnel import TUNNEL_IP_HEADER, device_id_for_tunnel_ip
 from app.models.db.session import Session as ExamSession
@@ -89,7 +89,8 @@ async def log_event_stream(channel: str):
         if message["type"] == "message":
             yield f"data: {message['data']}\n\n"
 
-@router.get("/session/{session_id}/user/{user_nmec}/stream", response_class=StreamingResponse, dependencies=[Depends(get_teacher_or_admin_user)])
+# The dashboard's EventSource sends the token as ?token=, not in a header.
+@router.get("/session/{session_id}/user/{user_nmec}/stream", response_class=StreamingResponse, dependencies=[Depends(get_teacher_or_admin_stream_user)])
 async def stream_session_user_logs(session_id: int, user_nmec: int):
     """Subscribe to session-user logs in real-time."""
     return StreamingResponse(

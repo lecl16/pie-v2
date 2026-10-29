@@ -5,7 +5,7 @@ from app.core.database import get_db
 from app.models.db.user import User
 from app.schemas.user import UserCreate, UserUpdate, UserOut, UserLogin, UserPassword, UserWithToken
 from app.core.security import hash_password, verify_password
-from app.core.auth import create_access_token
+from app.core.auth import create_access_token, get_current_user, get_teacher_or_admin_user, get_admin_user
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -43,19 +43,21 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
     return db_user
 
-@router.get("/", response_model=List[UserOut])
+# Reading users: teachers and admins (the dashboard shows the session's students).
+@router.get("/", response_model=List[UserOut], dependencies=[Depends(get_teacher_or_admin_user)])
 def read_users(db: Session = Depends(get_db)):
     users = db.query(User).all()
     return users
 
-@router.get("/{nmec}", response_model=UserOut)
+@router.get("/{nmec}", response_model=UserOut, dependencies=[Depends(get_teacher_or_admin_user)])
 def read_user(nmec: str, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.nmec == nmec).first()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
-@router.put("/{nmec}", response_model=UserOut)
+# Editing a user, including their role, and deleting one: admins only.
+@router.put("/{nmec}", response_model=UserOut, dependencies=[Depends(get_admin_user)])
 def update_user(nmec: int, user: UserUpdate, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.nmec == nmec).first()
     if db_user is None:
@@ -69,7 +71,15 @@ def update_user(nmec: int, user: UserUpdate, db: Session = Depends(get_db)):
     return db_user
 
 @router.put("/{nmec}/change-password", response_model=UserOut)
-def change_password(nmec: int, password_data: UserPassword, db: Session = Depends(get_db)):
+def change_password(
+    nmec: int,
+    password_data: UserPassword,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # Only one's own password.
+    if current_user.nmec != nmec:
+        raise HTTPException(status_code=403, detail="Only your own password")
     db_user = db.query(User).filter(User.nmec == nmec).first()
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -84,7 +94,7 @@ def change_password(nmec: int, password_data: UserPassword, db: Session = Depend
     db.refresh(db_user)
     return db_user
 
-@router.delete("/{nmec}", response_model=UserOut)
+@router.delete("/{nmec}", response_model=UserOut, dependencies=[Depends(get_admin_user)])
 def delete_user(nmec: str, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.nmec == nmec).first()
     if db_user is None:

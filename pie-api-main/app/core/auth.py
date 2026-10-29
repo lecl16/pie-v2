@@ -51,26 +51,37 @@ def get_current_user(
         detail="Invalid authentication credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    try:
-        token = credentials.credentials
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-        # A student's token from a join is bound to the tunnel address of
-        # the device it joined through (app/core/tunnel.py): it is refused
-        # from anywhere else, so a copied token is of no use on another
-        # machine.
-        tunnel_ip = payload.get("tip")
-        if tunnel_ip is not None and request.headers.get(TUNNEL_IP_HEADER) != tunnel_ip:
-            raise credentials_exception
-        token_data = TokenData(email=email)
-    except (JWTError, AttributeError):
-        raise credentials_exception
-    user = db.query(User).filter(User.email == token_data.email).first()
+    user = user_from_token(getattr(credentials, "credentials", None), request.headers, db)
     if user is None:
         raise credentials_exception
     return user
+
+def user_from_token(token: Optional[str], headers, db: Session) -> Optional[User]:
+    """The user a JWT names, or None if it is invalid. A student's token
+    from a join is bound to the tunnel address of the device it joined
+    through (app/core/tunnel.py): it is refused from anywhere else, so a
+    copied token is of no use on another machine."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except (JWTError, AttributeError):
+        return None
+    email = payload.get("sub")
+    if email is None:
+        return None
+    tunnel_ip = payload.get("tip")
+    if tunnel_ip is not None and headers.get(TUNNEL_IP_HEADER) != tunnel_ip:
+        return None
+    return db.query(User).filter(User.email == email).first()
+
+def websocket_user(websocket, db: Session) -> Optional[User]:
+    """For WebSockets and event streams, which a browser cannot give an
+    Authorization header: the token comes in the `token` query parameter,
+    or in that header."""
+    token = websocket.query_params.get("token")
+    if not token:
+        auth = websocket.headers.get("authorization", "")
+        token = auth[7:] if auth.lower().startswith("bearer ") else None
+    return user_from_token(token, websocket.headers, db) if token else None
 
 def get_current_active_user(current_user: User = Depends(get_current_user)):
     return current_user
@@ -90,6 +101,22 @@ def get_teacher_or_admin_user(current_user: User = Depends(get_current_user)):
             detail="Not enough permissions"
         )
     return current_user
+
+def get_teacher_or_admin_stream_user(request: Request, db: Session = Depends(get_db)):
+    """get_teacher_or_admin_user for event streams (the dashboard's live logs),
+    with the token read as in websocket_user."""
+    user = websocket_user(request, db)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
+    if user.role not in ["admin", "teacher"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    return user
 
 def get_device(x_device_key: str = Header(..., alias="X-Device-Key"), db: Session = Depends(get_db)) -> Device:
     # Authenticate exam device via it API key, sent in the X-Device-Key header

@@ -75,7 +75,7 @@ app.include_router(exam_router, prefix="/course/{course_id}", tags=["exam"], dep
 app.include_router(session_router, prefix="/course/{course_id}/{exam_id}", tags=["session"], dependencies=[Depends(get_current_user)])
 # The exam app joins without a student login: the device's proof is the credential.
 app.include_router(session_user_join_router, prefix="/session-users", tags=["session-users"])
-app.include_router(session_user_router, prefix="/session-users", tags=["session-users"], dependencies=[Depends(get_current_user)])
+app.include_router(session_user_router, prefix="/session-users", tags=["session-users"], dependencies=[Depends(get_teacher_or_admin_user)])
 app.include_router(submission_router, prefix="/submission", tags=["submission"], dependencies=[Depends(get_current_user)])
 
 # Create teacher/admin-only device router for the routes that mint or
@@ -134,7 +134,9 @@ for route in device_router.routes:
 
 app.include_router(protected_device_router, prefix="/device", tags=["device"], dependencies=[Depends(get_current_user)])
 app.include_router(screenshare_router, prefix="/screenshare", tags=["screenshare"])
-app.include_router(logs_router, prefix="/logs", tags=["logs"], dependencies=[Depends(get_current_user)])
+# No router-wide check: every /logs route has its own, and the live stream
+# takes the dashboard's token from the URL, which get_current_user doesn't read.
+app.include_router(logs_router, prefix="/logs", tags=["logs"])
 app.include_router(analytics_router, prefix="/analytics", tags=["analytics"], dependencies=[Depends(get_teacher_or_admin_user)])
 app.include_router(examiner_phone_router, prefix="/examiner-phone", tags=["examiner-phone"], dependencies=[Depends(get_teacher_or_admin_user)])
 

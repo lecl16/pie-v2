@@ -30,6 +30,8 @@ class SessionUserJoined(SessionUserOut):
     name: str
     access_token: str
     token_type: str
+    is_started: bool = False
+    remaining_seconds: Optional[int] = None
 
 class SessionUserUpdate(SessionUserBase):
     session_id: int

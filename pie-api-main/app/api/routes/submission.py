@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
@@ -13,20 +13,34 @@ from app.models.db.exam import Exam
 from app.models.db.course import Course
 from app.models.db.session_user import SessionUser
 from app.core.security import validate_file, sanitize_filename, secure_join_path, create_secure_directory
+from app.core.auth import get_current_user, get_teacher_or_admin_user
+from app.core.tunnel import own_join_through_tunnel
+from app.models.db.user import User
 
 import logging
 logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter()
 
+def _own_join_or_403(db, request: Request, user: User, session_user_id: int) -> SessionUser:
+    """Submissions, and the start and end of an attempt, only by the student
+    themself, through the device they joined on."""
+    session_user = own_join_through_tunnel(db, request, user, session_user_id=session_user_id)
+    if session_user is None:
+        raise HTTPException(status_code=403, detail="Not joined on this device")
+    return session_user
+
 @router.post("/create", response_model=SubmissionOut)
 async def create_submission(
     session_user_id: str,
+    request: Request,
     submission_file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Submit a completed exam solution file"""
     session_user_id = int(session_user_id)
+    _own_join_or_403(db, request, current_user, session_user_id)
 
     # Verify session user exists
     session_user = db.query(SessionUser).filter(SessionUser.id == session_user_id).first()
@@ -119,28 +133,36 @@ async def create_submission(
 
     return db_submission
 
-@router.get("/{session_user_id}", response_model=List[SubmissionOut])
+@router.get("/{session_user_id}", response_model=List[SubmissionOut], dependencies=[Depends(get_teacher_or_admin_user)])
 def read_submissions(session_user_id: int, db: Session = Depends(get_db)):
     submissions = db.query(Submission).filter(Submission.session_user_id == session_user_id).all()
     return submissions
 
 
 @router.post("/{session_user_id}/start", response_model=SessionUserUpdate)
-def start_session_user(session_user_id: int, db: Session = Depends(get_db)):
-    session_user = db.query(SessionUser).filter(SessionUser.id == session_user_id).first()
-    if session_user is None:
-        raise HTTPException(status_code=404, detail="Session user not found")
+def start_session_user(
+    session_user_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    session_user = _own_join_or_403(db, request, current_user, session_user_id)
 
-    session_user.start_time = datetime.utcnow()
+    # Kept on a rejoin: the remaining time is counted from the first start.
+    if session_user.start_time is None:
+        session_user.start_time = datetime.utcnow()
     db.commit()
     db.refresh(session_user)
     return session_user
 
 @router.post("/{session_user_id}/end", response_model=SessionUserUpdate)
-def end_session_user(session_user_id: int, db: Session = Depends(get_db)):
-    session_user = db.query(SessionUser).filter(SessionUser.id == session_user_id).first()
-    if session_user is None:
-        raise HTTPException(status_code=404, detail="Session user not found")
+def end_session_user(
+    session_user_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    session_user = _own_join_or_403(db, request, current_user, session_user_id)
 
     session_user.end_time = datetime.utcnow()
     db.commit()
