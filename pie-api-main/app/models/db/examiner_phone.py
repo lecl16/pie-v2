@@ -3,7 +3,7 @@ from app.models.db.base import Base
 
 class ExaminerPhone(Base):
     """An Examiner App installation enrolled by a teacher — see
-    docs/examiner-phone-enrollment.md. The phone holds the private key (in
+    README.md, "Phone enrollment". The phone holds the private key (in
     the Android Keystore); the server keeps only the fingerprint of the
     client certificate it issued, which Caddy forwards on the phone port.
     Revoking sets revoked_at; the row is kept for the audit columns that

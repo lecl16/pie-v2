@@ -809,15 +809,15 @@ def register_provisioning_secret(
     # Explicit: session_router's own default dependency is get_current_user
     # (any authenticated role). This one also requires teacher/admin, and
     # that the request comes from that teacher's enrolled Examiner App phone
-    # (docs/examiner-phone-enrollment.md).
+    # (README.md, "Phone enrollment").
     phone: ExaminerPhone = Depends(get_examiner_phone),
 ):
     """The examiner app, as the trusted node, registers the secret it just
     generated before delivering the same secret to the device over NFC — see
-    docs/examiner-trusted-node-provisioning.md section 2. It also assigns
+    README.md, "Session provisioning". It also assigns
     the student (`nmec`) the examiner seated at this device after checking
     their card; only that student can later join the session from this
-    device (docs/tap-gated-student-join.md). Happens before the student
+    device (README.md, "Joining a session"). Happens before the student
     joins, so no SessionUser is needed. Re-registering for the same device
     and session replaces the previous secret and student and resets it to
     unconfirmed, so a wrong NMEC can be fixed before the student joins.
@@ -894,7 +894,7 @@ def invalidate_provisioning_secret(
 ):
     """The examiner backed out before tapping — drop the secret so it can't
     be confirmed later. A confirmed secret is kept: the student's join
-    checks it (docs/tap-gated-student-join.md), and the examiner app calls
+    checks it (README.md, "Joining a session"), and the examiner app calls
     this on "Deactivate" whether or not the tap went through."""
     _get_session_or_404(db, course_id, exam_id, session_id)
     secret_row = db.query(DeviceProvisioningSecret).filter(

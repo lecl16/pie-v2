@@ -16,7 +16,7 @@ import javax.crypto.spec.SecretKeySpec
 
 /**
  * Encrypts an NFC response to the reader's per-tap public key — see
- * pie-api-main/docs/examiner-trusted-node-provisioning.md section 3. Must
+ * pie-api-main/README.md, "Session provisioning". Must
  * match decrypt_envelope() in NFC-Support/reader_script.py.
  *
  * Envelope: phone_pub (65) || nonce (12) || AES-256-GCM ciphertext+tag, with

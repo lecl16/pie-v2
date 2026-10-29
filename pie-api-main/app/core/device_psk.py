@@ -1,5 +1,5 @@
 """Per-device TLS pre-shared keys for the Pi ↔ server link — see
-docs/device-tls-psk.md.
+README.md, "Device TLS-PSK".
 
 The PSK is derived from the device API key, which the server only has in
 plaintext when it mints one (POST /device/create, /rotate-key). It is

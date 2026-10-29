@@ -10,7 +10,7 @@ import com.facebook.react.bridge.WritableMap
 /**
  * JS access to PhoneCredential: the app enrolls the phone after login and
  * then sends the trusted-node calls to the phone port — see
- * pie-api-main/docs/examiner-phone-enrollment.md.
+ * pie-api-main/README.md, "Phone enrollment".
  */
 class PhoneCredentialModule(private val reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {

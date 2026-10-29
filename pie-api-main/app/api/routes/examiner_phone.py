@@ -1,4 +1,4 @@
-"""Enrollment of Examiner App phones — see docs/examiner-phone-enrollment.md.
+"""Enrollment of Examiner App phones — see README.md, "Phone enrollment".
 
 The phone generates its key pair in the Android Keystore and sends a
 certificate signing request after the teacher logs in; the server signs a

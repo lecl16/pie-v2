@@ -42,7 +42,7 @@ if [[ -f "$ENV_FILE" ]]; then
   # Settings added after a deployment's .env was first generated: append the
   # missing ones, never touching the existing values.
   if ! grep -q '^DEVICE_PSK_WRAP_KEY=' "$ENV_FILE"; then
-    printf '\n# Wraps the exam devices TLS pre-shared keys (docs/device-tls-psk.md)\nDEVICE_PSK_WRAP_KEY=%s\n' \
+    printf '\n# Wraps the exam devices TLS pre-shared keys (README.md, "Device TLS-PSK")\nDEVICE_PSK_WRAP_KEY=%s\n' \
       "$(openssl rand -hex 32)" >> "$ENV_FILE"
     echo "Added DEVICE_PSK_WRAP_KEY to the existing $ENV_FILE."
   fi
@@ -75,7 +75,7 @@ cat > "$ENV_FILE" <<EOF
 APP_PORT=8000
 JWT_SECRET_KEY=${JWT_SECRET_KEY}
 JWT_ALGORITHM=HS256
-# Wraps the exam devices' TLS pre-shared keys (docs/device-tls-psk.md)
+# Wraps the exam devices' TLS pre-shared keys (README.md, "Device TLS-PSK")
 DEVICE_PSK_WRAP_KEY=${DEVICE_PSK_WRAP_KEY}
 # The API address compiled into the dashboard (rebuild after changing it)
 PIE_API_URL=${PIE_API_URL}

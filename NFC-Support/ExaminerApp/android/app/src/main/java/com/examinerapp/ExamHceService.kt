@@ -16,7 +16,7 @@ class ExamHceService : HostApduService() {
         var sharedSecretB64u: String = ""
 
         // Holds a freshly created, not-yet-delivered device identity — see
-        // pie-api-main/docs/device-identity-nfc-bootstrap.md section 2.
+        // pie-api-main/README.md, "Registering a PIE device".
         // Empty means "nothing pending", so an unrelated tap against this
         // phone can't accidentally claim a device.
         var pendingDeviceIdentityJson: String = ""

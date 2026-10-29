@@ -1,5 +1,5 @@
 """Issues the client certificates of enrolled Examiner App phones — see
-docs/examiner-phone-enrollment.md. Signed by the phone CA that
+README.md, "Phone enrollment". Signed by the phone CA that
 scripts/generate-certs.sh creates, which Caddy trusts on the phone port."""
 
 import secrets

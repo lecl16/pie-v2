@@ -13,7 +13,7 @@ class Config {
   // Pi on every boot (see fetchDeviceIdentity()) and only ever held in memory.
   int? _deviceId;
   // Same for the API server address: the image deliberately carries none
-  // (pie-api-main/docs/examiner-trusted-node-provisioning.md) — the examiner
+  // (pie-api-main/README.md, "Session provisioning") — the examiner
   // app delivers it to the Pi over NFC and the Pi relays it here.
   String? _apiBaseUrl;
   // Plain HTTP: `apiBaseUrl` is the server's address inside the Pi's

@@ -41,7 +41,7 @@ http://:8001 {
 	import api
 }
 
-# Enrolled Examiner App phones only (docs/examiner-phone-enrollment.md): the
+# Enrolled Examiner App phones only (README.md, "Phone enrollment"): the
 # handshake fails without a client certificate signed by the phone CA, and
 # the API gets the certificate's fingerprint to look up which phone it is.
 :8443 {

@@ -508,7 +508,7 @@ class _ExamHomePageState extends State<ExamHomePage> {
                 ),
                 SizedBox(height: 20),
                 // Gated ahead of everything else below: an unclaimed device
-                // (see pie-api-main/docs/device-identity-nfc-bootstrap.md)
+                // (see pie-api-main/README.md, "Registering a PIE device")
                 // has no deviceId yet, so session join would fail even if
                 // the server connection came up — there's nothing useful
                 // for a student to do here until the examiner's NFC tap
@@ -532,7 +532,7 @@ class _ExamHomePageState extends State<ExamHomePage> {
                 ] else if (!_sessionProvisioned) ...[
                   // The examiner taps the device after checking the
                   // student's card, before the student logs in
-                  // (pie-api-main/docs/tap-gated-student-join.md).
+                  // (pie-api-main/README.md, "Joining a session").
                   CircularProgressIndicator(),
                   SizedBox(height: 20),
                   Text(

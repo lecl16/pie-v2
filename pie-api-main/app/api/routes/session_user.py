@@ -84,8 +84,7 @@ def join_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     # A confirmed tap stays valid until the session ends, not just until
-    # its 5-minute confirmation window (docs/tap-gated-student-join.md
-    # section 7).
+    # its 5-minute confirmation window (README.md, "Joining a session").
     if session.is_ended:
         raise HTTPException(status_code=403, detail="Session has ended")
 

@@ -27,7 +27,7 @@ services:
               "--proxy-headers", "--forwarded-allow-ips", "*"]
 
   # The device port: TLS-PSK for the exam devices (app/device_tls_server.py,
-  # docs/device-tls-psk.md). Same image and code as `app`; published
+  # README.md, "Device TLS-PSK"). Same image and code as `app`; published
   # directly, since Caddy cannot terminate TLS-PSK.
   device-api:
     build: .

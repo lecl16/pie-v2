@@ -28,7 +28,7 @@ import org.bouncycastle.pkcs.PKCS10CertificationRequestBuilder
 
 /**
  * This phone's client credential for the PIE API's phone port — see
- * pie-api-main/docs/examiner-phone-enrollment.md. The private key is
+ * pie-api-main/README.md, "Phone enrollment". The private key is
  * generated in the Android Keystore and never leaves it; the certificate the
  * server issues for it is kept in the app's preferences.
  */

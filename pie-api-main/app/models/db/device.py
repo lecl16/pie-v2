@@ -10,10 +10,10 @@ class Device(Base):
     last_update = Column(DateTime)
     device_api_key_hash = Column(String(64), unique=True, index=True, nullable=True)
     # Audit: the enrolled Examiner App phone that created this device
-    # (docs/examiner-phone-enrollment.md). Null for devices created before.
+    # (README.md, "Phone enrollment"). Null for devices created before.
     created_by_phone_id = Column(Integer, nullable=True)
     # TLS pre-shared key for the device port, derived from the API key when
-    # it is minted and stored wrapped (docs/device-tls-psk.md). Null for a
+    # it is minted and stored wrapped (README.md, "Device TLS-PSK"). Null for a
     # device whose key predates it: rotate the key and register it again.
     tls_psk_enc = Column(String(255), nullable=True)
     # The device's WireGuard public key (app/core/tunnel.py), registered by

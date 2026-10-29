@@ -3,7 +3,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 class ExaminerPhoneEnroll(BaseModel):
-    """Sent by the Examiner App after login — docs/examiner-phone-enrollment.md."""
+    """Sent by the Examiner App after login — README.md, "Phone enrollment"."""
     csr: str = Field(..., max_length=4096)  # PKCS#10, PEM
     label: str = Field(default="", max_length=100)  # e.g. the phone's model
 

@@ -9,13 +9,13 @@ a `boot=live` RAM overlay wiped every reboot (no persistence configured in
 pie-system-image-main/Makefile), so it can never locally cache a deviceId
 the way a normal file write would assume. Instead it re-fetches it from
 here, over the same usb0 link already used for its network uplink, on every
-boot. See pie-api-main/docs/device-identity-nfc-bootstrap.md.
+boot. See pie-api-main/README.md, "Registering a PIE device".
 
 It serves the API server address the same way: the amd64 image carries no
 server address at all, only this Pi's fixed usb0 address. `apiBaseUrl`
 arrives on the Pi through the examiner app's NFC taps (the claim tap, then
 refreshed by every confirmed session tap — see
-pie-api-main/docs/examiner-trusted-node-provisioning.md section 5), and
+pie-api-main/README.md, "Session provisioning"), and
 DevApp-main picks it up from here.
 
 The exam app reaches the server only through this Pi's WireGuard tunnel

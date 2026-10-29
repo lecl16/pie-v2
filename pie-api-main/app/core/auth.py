@@ -142,7 +142,7 @@ def get_examiner_phone(
     """For the actions only the trusted node may take (creating devices,
     registering provisioning secrets): the request must come from an
     enrolled, unrevoked Examiner App phone that belongs to the logged-in
-    teacher — see docs/examiner-phone-enrollment.md. Needs both the JWT and
+    teacher — see README.md, "Phone enrollment". Needs both the JWT and
     the phone's certificate, so neither a stolen password nor a stolen
     phone is enough on its own."""
     fingerprint = request.headers.get(PHONE_CERT_HEADER, "")

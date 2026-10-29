@@ -1,5 +1,5 @@
 """The device port: TLS-PSK for the exam devices (Pis) — see
-docs/device-tls-psk.md.
+README.md, "Device TLS-PSK".
 
 Run as `python -m app.device_tls_server` (the `device-api` compose service).
 Serves the same FastAPI app as the main listener, but:

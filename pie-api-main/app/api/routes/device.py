@@ -41,7 +41,7 @@ def create_device(
     db: Session = Depends(get_db),
     # Only an enrolled Examiner App phone mints device identities, since it
     # is the one that delivers them in the registration tap
-    # (docs/examiner-phone-enrollment.md).
+    # (README.md, "Phone enrollment").
     phone: ExaminerPhone = Depends(get_examiner_phone),
 ):
     api_key = generate_device_api_key()
@@ -112,12 +112,12 @@ def delete_device(device_id: int, db: Session = Depends(get_db)):
 def rotate_device_key(device_id: int, db: Session = Depends(get_db)):
     """Revokes a device's current API key and issues a new one in its place,
     keeping the `Device` row (and its `session_user` history) intact — see
-    pie-api-main/docs/device-identity-nfc-bootstrap.md section 4. This is
+    README.md, "Registering a PIE device". This is
     step 1 of that doc's two-step reset procedure: rotate here first, only
     then clear the device's local /etc/pie/device.json, never the reverse.
     Like `POST /create`, the plaintext key is returned once and never
     stored or retrievable in plaintext again. Also replaces the device's
-    TLS pre-shared key, which is derived from it (docs/device-tls-psk.md),
+    TLS pre-shared key, which is derived from it (README.md, "Device TLS-PSK"),
     so the old key stops working on the device port too."""
     device = db.query(Device).filter(Device.id == device_id).first()
     if device is None:
@@ -159,7 +159,7 @@ def confirm_provisioning_secret(
     db: Session = Depends(get_db),
 ):
     """Called by the device right after an NFC session tap — see
-    docs/examiner-trusted-node-provisioning.md section 4. The device proves
+    README.md, "Session provisioning". The device proves
     it holds the secret the examiner app registered for this device and
     session; the response proves the same back, so the device knows it is
     talking to the server the phone registered with. Deliberately takes no
@@ -191,7 +191,7 @@ def confirm_provisioning_secret(
     student = db.query(User).filter(User.nmec == secret_row.nmec).first() if secret_row.nmec is not None else None
     return DeviceProvisioningSecretConfirmed(
         sessionId=str(session_id),
-        # The examiner-assigned student (docs/tap-gated-student-join.md),
+        # The examiner-assigned student (README.md, "Joining a session"),
         # authoritative over the copy the phone put in the tap.
         nmec=str(secret_row.nmec) if secret_row.nmec is not None else "",
         # Shown by the exam app, so the student can see the seat is theirs
@@ -213,11 +213,11 @@ def provisioned_session_status(
 ):
     """Polled by the Pi's device_identity_server.py so it can drop its
     session.json once the provisioning no longer lets anyone join — see
-    docs/tap-gated-student-join.md section 7 — and so its filtering proxy
+    README.md, "Joining a session" — and so its filtering proxy
     has the session's allowed links and the assigned student. A confirmed tap stays valid
     across reboots until then. The X-Device-Key here is safe to send: the
     Pi only polls the apiBaseUrl the server already proved itself on in the
-    confirmation (docs/examiner-trusted-node-provisioning.md section 4)."""
+    confirmation (README.md, "Session provisioning")."""
     if device.id != device_id:
         raise HTTPException(status_code=403, detail="Not this device")
 

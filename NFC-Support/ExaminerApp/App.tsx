@@ -2,7 +2,7 @@
  * @format
  *
  * Secure provisioning app flow — this app is the trusted node (see
- * pie-api-main/docs/examiner-trusted-node-provisioning.md):
+ * pie-api-main/README.md, "Session provisioning"):
  * 1) Examiner logs in (teacher/admin JWT, same as WebApp).
  * 2) App generates a session secret and registers it with pie-api-main for
  *    one device + session.
@@ -14,7 +14,7 @@
  * After login the app also enrolls the phone (once): it gets a client
  * certificate for a key kept in the Android Keystore, and sends the
  * trusted-node calls (device creation, provisioning secrets) to the API's
- * phone port with it — see pie-api-main/docs/examiner-phone-enrollment.md.
+ * phone port with it — see pie-api-main/README.md, "Phone enrollment".
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -489,7 +489,7 @@ function AppContent(): React.JSX.Element {
           Authorization: `Bearer ${accessToken}`,
         },
         // The examiner assigns this student to this device after checking
-        // their card (pie-api-main/docs/tap-gated-student-join.md): the
+        // their card (pie-api-main/README.md, "Joining a session"): the
         // server only lets this NMEC join the session from this device.
         body: JSON.stringify({
           secret,

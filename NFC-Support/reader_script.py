@@ -56,9 +56,9 @@ PN532_STATUS_MORE_INFO_BIT = 0x40
 PN532_EXCHANGE_RESPONSE_LENGTH = 262  # PN532 frame payload ceiling per InDataExchange call
 
 # Delivered by an NFC identity-bootstrap tap (see
-# pie-api-main/docs/device-identity-nfc-bootstrap.md) on a freshly-flashed
+# pie-api-main/README.md, "Registering a PIE device") on a freshly-flashed
 # device, or written manually per that doc's predecessor
-# (pie-api-main/docs/device-provisioning-secret-registration.md section 1)
+# (pie-api-main/README.md, "Session provisioning")
 # on an already-imaged one: {"apiBaseUrl": "...", "deviceId": <int>,
 # "deviceApiKey": "..."}. `apiBaseUrl` is later refreshed by every
 # successfully confirmed session tap (see apply_session_provisioning()), so
@@ -503,7 +503,7 @@ def on_connect_claim(tag):
     """Claim-listener tap handler for an unclaimed device (DEVICE_CONFIG_FILE
     absent). Mirrors on_connect()'s SELECT-then-command shape, but issues
     INS_GET_DEVICE_IDENTITY instead of the session-provisioning challenge —
-    see pie-api-main/docs/device-identity-nfc-bootstrap.md section 2. An
+    see pie-api-main/README.md, "Registering a PIE device". An
     unclaimed device has no session to provision yet, so the only gate is
     whether the phone happens to be holding a freshly-created, undelivered
     identity at all.

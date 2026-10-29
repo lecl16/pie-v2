@@ -108,7 +108,7 @@ app.include_router(
 # Routes called by the exam device itself, which has no JWT to satisfy
 # get_current_user — mounted with no router-level auth dependency. Each one
 # authenticates in its own body (the confirm route checks an HMAC proof of
-# the session's provisioning secret, see docs/examiner-trusted-node-provisioning.md;
+# the session's provisioning secret, see README.md, "Session provisioning";
 # the status route takes the device's X-Device-Key).
 DEVICE_SELF_AUTH_PATHS = {
     "/{device_id}/provisioning-secret/{session_id}/confirm",

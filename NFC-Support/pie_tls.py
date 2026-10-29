@@ -1,5 +1,5 @@
 """TLS to the PIE API's device port with this device's pre-shared key — see
-pie-api-main/docs/device-tls-psk.md.
+pie-api-main/README.md, "Device TLS-PSK".
 
 Standard library only: device_identity_server.py runs on the system
 python3, outside the reader's venv. Needs Python 3.13+ (ssl's PSK

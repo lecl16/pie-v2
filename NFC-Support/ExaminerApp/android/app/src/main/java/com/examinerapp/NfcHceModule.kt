@@ -20,7 +20,7 @@ class NfcHceModule(reactContext: ReactApplicationContext) :
      * A fresh 32-byte session secret, base64url — generated here rather than
      * in JS because React Native has no built-in CSPRNG. The app registers it
      * with the server and then hands it back via setSecureProvisioning(); see
-     * pie-api-main/docs/examiner-trusted-node-provisioning.md section 2.
+     * pie-api-main/README.md, "Session provisioning".
      */
     @ReactMethod
     fun generateSecret(promise: Promise) {
@@ -44,7 +44,7 @@ class NfcHceModule(reactContext: ReactApplicationContext) :
     /**
      * Holds a freshly created device identity in memory, ready to be
      * delivered on the next INS_GET_DEVICE_IDENTITY tap — see
-     * pie-api-main/docs/device-identity-nfc-bootstrap.md section 2.
+     * pie-api-main/README.md, "Registering a PIE device".
      * `identityJson` is `{"deviceId": <int>, "apiKey": "...", "apiBaseUrl": "..."}`.
      */
     @ReactMethod
