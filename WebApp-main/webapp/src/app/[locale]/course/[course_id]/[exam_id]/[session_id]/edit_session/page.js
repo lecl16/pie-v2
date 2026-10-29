@@ -179,12 +179,12 @@ export default function EditSessionForm() {
               count: students.length,
               duplicates: duplicates.length,
             }) ||
-              `Whitelist updated with ${students.length} student emails. ${duplicates.length} duplicate(s) were removed.`
+              `Allowed students updated: ${students.length} emails, ${duplicates.length} duplicate(s) removed.`
           );
         } else {
           toast.success(
             t("WhitelistUpdated", { count: students.length }) ||
-              `Whitelist updated with ${students.length} student emails`
+              `Allowed students updated: ${students.length} emails`
           );
         }
 
@@ -230,7 +230,7 @@ export default function EditSessionForm() {
 
   const clearWhitelist = () => {
     setWhitelistedStudents([]);
-    toast.success(t("WhitelistCleared") || "Student whitelist cleared");
+    toast.success(t("WhitelistCleared"));
   };
 
   const form = useForm({
@@ -748,9 +748,7 @@ export default function EditSessionForm() {
                 <div className="mt-4">
                   <div className="flex justify-between items-center bg-blue-50 p-2 rounded-t-md border-b">
                     <p className="text-sm font-medium text-blue-700">
-                      {t("Whitelisted Links", {
-                        count: whitelistLinks.length,
-                      }) || `Whitelisted Links (${whitelistLinks.length})`}
+                      {t("AllowedLinksList")}
                     </p>
                   </div>
                   <div className="max-h-60 overflow-y-auto border border-t-0 rounded-b-md">
@@ -783,7 +781,7 @@ export default function EditSessionForm() {
 
           <div className="border rounded-md p-4">
             <h3 className="font-medium mb-4">
-              {t("Student Whitelist") || "Student Whitelist"}
+              {t("AllowedStudents")}
             </h3>
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
@@ -818,7 +816,7 @@ export default function EditSessionForm() {
                       onClick={clearWhitelist}
                       className="border-red-300 text-red-600 hover:bg-red-50"
                     >
-                      {t("ClearWhitelist") || "Clear Whitelist"}
+                      {t("ClearWhitelist")}
                     </Button>
                   )}
                 </div>
@@ -844,9 +842,7 @@ export default function EditSessionForm() {
               <div className="mt-4">
                 <div className="flex justify-between items-center bg-blue-50 p-2 rounded-t-md border-b">
                   <p className="text-sm font-medium text-blue-700">
-                    {t("WhitelistedStudents", {
-                      count: whitelistedStudents.length,
-                    }) || `Whitelisted Students (${whitelistedStudents.length})`}
+                    {t("AllowedStudentsList", { count: whitelistedStudents.length })}
                   </p>
                 </div>
                 <div className="max-h-60 overflow-y-auto border border-t-0 rounded-b-md">
@@ -872,7 +868,7 @@ export default function EditSessionForm() {
                     ))}
                    {whitelistedStudents.length === 0 && (
                       <li className="p-3 text-center text-sm text-muted-foreground">
-                        {t("No Students Whitelisted") || "No students whitelisted - all students will be allowed"}
+                        {t("NoAllowedStudents")}
                       </li>
                     )}
                   </ul>

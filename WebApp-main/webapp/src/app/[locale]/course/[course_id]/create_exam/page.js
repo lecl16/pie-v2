@@ -172,12 +172,12 @@ export default function CreateExamForm() {
               count: students.length, 
               duplicates: duplicates.length 
             }) || 
-            `Whitelist updated with ${students.length} student emails. ${duplicates.length} duplicate(s) were removed.`
+            `Allowed students updated: ${students.length} emails, ${duplicates.length} duplicate(s) removed.`
           );
         } else {
           toast.success(
             t("WhitelistUpdated", { count: students.length }) ||
-            `Whitelist updated with ${students.length} student emails`
+            `Allowed students updated: ${students.length} emails`
           );
         }
 
@@ -218,7 +218,7 @@ export default function CreateExamForm() {
 
   const clearWhitelist = () => {
     setWhitelistedStudents([]);
-    toast.success(t("WhitelistCleared") || "Student whitelist cleared");
+    toast.success(t("WhitelistCleared"));
   };
 
   const validateFormBeforeSubmit = (values) => {
@@ -617,7 +617,7 @@ export default function CreateExamForm() {
                   {/* Display whitelist links */}
                   {whitelistLinks.length > 0 && (
                     <div className="mt-4">
-                      <p className="text-sm font-medium">{t("Whitelisted Links") || "Whitelisted Links"}:</p>
+                      <p className="text-sm font-medium">{t("AllowedLinksList")}:</p>
                       <ul className="mt-2 space-y-2">
                         {whitelistLinks.map((link, index) => (
                           <li key={index} className="flex items-center justify-between bg-muted p-2 rounded-md">
@@ -641,10 +641,10 @@ export default function CreateExamForm() {
 
               {/* New Student Whitelist Section */}
               <div className="border rounded-md p-4">
-                <h3 className="font-medium mb-4">{t("Student Whitelist") || "Student Whitelist"}</h3>
+                <h3 className="font-medium mb-4">{t("AllowedStudents")}</h3>
                 <div className="space-y-4">
                   <p className="text-sm text-muted-foreground">
-                    {t("StudentWhitelistDescription") || "Add students who are allowed to join this session. Leave empty to allow all students."}
+                    {t("StudentWhitelistDescription")}
                   </p>
                   
                   <div className="flex flex-col gap-2">
@@ -672,7 +672,7 @@ export default function CreateExamForm() {
                           onClick={clearWhitelist}
                           className="border-red-300 text-red-600 hover:bg-red-50"
                         >
-                          {t("ClearWhitelist") || "Clear Whitelist"}
+                          {t("ClearWhitelist")}
                         </Button>
                       )}
                     </div>
@@ -701,8 +701,7 @@ export default function CreateExamForm() {
                     <div className="mt-4">
                       <div className="flex justify-between items-center">
                         <p className="text-sm font-medium">
-                          {t("WhitelistedStudents", { count: whitelistedStudents.length }) || 
-                           `Whitelisted Students (${whitelistedStudents.length})`}:
+                          {t("AllowedStudentsList", { count: whitelistedStudents.length })}:
                         </p>
                       </div>
                       <div className="mt-2 max-h-40 overflow-y-auto border rounded-md">

@@ -4,6 +4,16 @@ import { useEffect, useRef, useState } from "react";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://localhost:8000";
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, "ws");
 
+function currentToken() {
+  const cookie = document.cookie.split("; ").find((c) => c.startsWith("currentUser="));
+  if (!cookie) return "";
+  try {
+    return (JSON.parse(decodeURIComponent(cookie.slice("currentUser=".length))).access_token || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 export default function ScreenViewer({ user_nmec, sessionId, courseId, examId }) {
   const videoRef = useRef(null);
   const peerConnection = useRef(null);
@@ -134,7 +144,9 @@ export default function ScreenViewer({ user_nmec, sessionId, courseId, examId })
       };
   
       // Connect to the WebSocket server
-      const ws = new WebSocket(`${WS_BASE_URL}/screenshare/ws/monitor/${sessionId}`);
+      // A browser cannot set headers on a WebSocket, so the teacher's
+      // token goes in the query string.
+      const ws = new WebSocket(`${WS_BASE_URL}/screenshare/ws/monitor/${sessionId}?token=${encodeURIComponent(currentToken())}`);
       webSocket.current = ws;
   
       ws.onopen = () => {
