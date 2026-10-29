@@ -159,7 +159,7 @@ function AppContent(): React.JSX.Element {
   const insets = useSafeAreaInsets();
 
   const [active, setActive] = useState(false);
-  const [status, setStatus] = useState('Log in, then pick a device to provision.');
+  const [status, setStatus] = useState('Log in, then register a device or pick a session.');
   const [busy, setBusy] = useState(false);
 
   const [apiBaseUrl, setApiBaseUrl] = useState('https://REPLACE-WITH-YOUR-PIE-API-HOST:8000');
@@ -205,7 +205,7 @@ function AppContent(): React.JSX.Element {
     null,
   );
   const [deviceStatus, setDeviceStatus] = useState(
-    'Provisioning a new device holds its identity here until the next NFC tap.',
+    'Registering a new device holds its identity here until the next NFC tap.',
   );
 
   const baseUrl = useCallback(() => apiBaseUrl.trim().replace(/\/$/, ''), [apiBaseUrl]);
@@ -634,7 +634,7 @@ function AppContent(): React.JSX.Element {
   const cancelPendingIdentity = useCallback(() => {
     nfcHceModule?.clearPendingDeviceIdentity?.();
     setPendingIdentity(null);
-    setDeviceStatus('Provisioning cancelled — identity discarded, no tap will claim it now.');
+    setDeviceStatus('Registration cancelled — identity discarded, no tap will claim it now.');
   }, []);
 
   return (
@@ -752,7 +752,7 @@ function AppContent(): React.JSX.Element {
 
       {accessToken ? (
         <View style={styles.card}>
-          <Text style={styles.infoTitle}>Provision New Device</Text>
+          <Text style={styles.infoTitle}>Register New Device</Text>
           <Text style={styles.infoText}>
             Creates a device identity and holds it here until you tap the
             phone on a new, unregistered device.

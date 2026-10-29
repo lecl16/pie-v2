@@ -156,7 +156,7 @@ only, like the server URL.
 A freshly set-up Pi has no `/etc/pie/device.json`, so its reader runs a
 claim listener.
 
-1. Under **Provision New Device**, enter a **Device Name** (e.g.
+1. Under **Register New Device**, enter a **Device Name** (e.g.
    `Sala 101 - PC03`) and tap **Create & Hold for Tap**. This calls
    `POST /device/create` and holds the returned identity on the phone.
 2. Tap the phone against the Pi's reader. The Pi writes
