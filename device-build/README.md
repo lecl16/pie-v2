@@ -135,7 +135,8 @@ needed for TLS-PSK).
    The script refuses to run without a valid public key.
 
    It also installs dnsmasq, nftables, the SSH server and `wireguard-tools`
-   (the tunnel to the server), and enables them.
+   (the tunnel to the server), and enables them. It turns off `rpcbind`,
+   NFS's port mapper, which Raspberry Pi OS runs and the device doesn't use.
 5. **Install the device services:**
    ```bash
    sudo bash aux-files/install-nfc-reader.sh /media/$USER/rootfs

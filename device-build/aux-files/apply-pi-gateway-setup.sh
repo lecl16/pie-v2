@@ -160,6 +160,9 @@ mount --bind /dev/pts "$ROOTFS/dev/pts"
 chroot "$ROOTFS" apt update
 chroot "$ROOTFS" apt install -y dnsmasq nftables openssh-server wireguard-tools
 chroot "$ROOTFS" systemctl enable NetworkManager dnsmasq nftables ssh
+# Raspberry Pi OS runs rpcbind (the port mapper of NFS), which the device
+# doesn't use: masked, so nothing starts it as a dependency either.
+chroot "$ROOTFS" systemctl mask rpcbind.service rpcbind.socket
 
 touch "$BOOTFS/ssh"
 
