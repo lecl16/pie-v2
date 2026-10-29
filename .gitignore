@@ -1,0 +1,14 @@
+__pycache__/
+venv/
+.venv/
+node_modules/
+build/
+.next/
+.env
+pie-api-main/certs/
+device-build/pie-system-image-main/chroot/
+device-build/pie-system-image-main/cache/
+device-build/pie-system-image-main/binary/
+device-build/pie-system-image-main/*.iso
+device-build/pie-system-image-main/config/includes.chroot/opt/devapp/*
+!device-build/pie-system-image-main/config/includes.chroot/opt/devapp/.gitkeep

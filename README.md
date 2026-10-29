@@ -12,6 +12,28 @@ PIE is designed to be self-hosted and run by a single examiner: one server
 machine, the examiner's phone, and one PIE device per seat. No
 infrastructure is needed in the exam room beyond a Wi-Fi network.
 
+## Origin
+
+This is a revised version of the original PIE
+([PortableIsolatedEnvironment](https://github.com/PortableIsolatedEnvironment)):
+D. Silva, D. Santos, G. Janicas, M. Reis, R. Moço and T. Garcia, *Secure
+Environment for Academic Assessment*, PECI project report, University of
+Aveiro, 2024. This version adds:
+
+- NFC provisioning from the examiner's phone (the examiner app), which gives
+  each device its identity, its session and its student with a tap;
+- no deployment-specific configuration in the exam image: the same image
+  serves every server and every exam;
+- a join without a student login, accepted only through the tunnel of the
+  device the examiner tapped, for the student assigned to it;
+- the device as the laptop's only network connection: a WireGuard tunnel to
+  the server, and web filtering on the device, with the session's allowed
+  links and, on eLearning, only the assigned student's account.
+
+Developed by Luís Leal for the MSc dissertation *NFC-based Management of a
+TCB for Exam Support*, University of Aveiro, 2026, supervised by André
+Zúquete and João Paulo Barraca.
+
 ## Components
 
 | Directory | What it is | Runs on |
@@ -28,9 +50,10 @@ infrastructure is needed in the exam room beyond a Wi-Fi network.
    ┌────────────┐ ───────────────────────────── ┌──────────────────────────────┐
    │ PIE device │  TLS-PSK :8444                │ Server                       │
    │ (Pi + NFC) │ ◀───────────────────────────▶ │  Caddy :3000 / :8000 / :8443 │
-   └─────┬──────┘                               │  API, device API :8444       │
+   │            │  WireGuard tunnel, UDP 51820  │  API, device API :8444       │
+   └─────┬──────┘ ◀───────────────────────────▶ │  WireGuard, API :8001 in it  │
      USB │ exam OS image + network              │  MySQL, Redis, ES, ClamAV    │
-   ┌─────┴──────┐  HTTPS :8000 (via the device) │                              │
+   ┌─────┴──────┐  HTTP :8001, inside the tunnel│                              │
    │  Laptop    │ ────────────────────────────▶ │                              │
    │ (exam OS,  │                               └──────────────────────────────┘
    │  exam app) │                                  ▲ HTTPS :8443    ▲ HTTPS :3000
@@ -55,7 +78,7 @@ infrastructure is needed in the exam room beyond a Wi-Fi network.
 5. **PIE devices.** For each device: flash Raspberry Pi OS, copy the ISO
    and the boot configuration, run the two setup scripts, then boot it once
    with network access.
-6. **Register each device** with a tap of the examiner app ("Provision New
+6. **Register each device** with a tap of the examiner app ("Register New
    Device"). This is done once per device.
 
 ## Running an exam
@@ -98,5 +121,4 @@ unplugged (see `device-build/README.md`, "Operations").
   eLearning only the assigned student's account (checked by NMEC).
 
 Each mechanism is described in the API README's
-["How it works"](pie-api-main/README.md#how-it-works) section. The known
-limitations of each component are listed in its README.
+["How it works"](pie-api-main/README.md#how-it-works) section.
